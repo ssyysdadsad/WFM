@@ -1,0 +1,106 @@
+{
+  "startedAt": "2026-04-18T08:32:36.786Z",
+  "config": {
+    "supabaseUrl": "https://gtzbjvqqxsrffsvglula.supabase.co",
+    "email": "2126787800@qq.com",
+    "projectId": null,
+    "scheduleMonth": "2026-04-01",
+    "shiftChangeRequestId": null
+  },
+  "auth": {
+    "authUserId": "ffffb187-2399-4575-b519-25b0935e96ea",
+    "email": "2126787800@qq.com"
+  },
+  "operator": {
+    "id": "3cdcb491-60b3-4fc9-bd81-dcda247f0f73",
+    "username": "admin",
+    "auth_user_id": "ffffb187-2399-4575-b519-25b0935e96ea"
+  },
+  "project": {
+    "id": "098d7b05-ec0c-4a6d-aa7b-1060dd1e652d",
+    "project_name": "上海浦东道路采集项目"
+  },
+  "import": {
+    "status": 200,
+    "body": {
+      "success": true,
+      "scheduleVersionId": "6e4f14dc-a260-4f66-9b3c-f49d8d6d20f6",
+      "batchId": "ed86d880-791c-49a1-9047-f90ee834d18d",
+      "importedRows": 6,
+      "failedRows": 0,
+      "errors": [],
+      "message": "导入成功"
+    }
+  },
+  "importVerification": {
+    "scheduleVersion": {
+      "id": "6e4f14dc-a260-4f66-9b3c-f49d8d6d20f6",
+      "project_id": "098d7b05-ec0c-4a6d-aa7b-1060dd1e652d",
+      "schedule_month": "2026-04-01",
+      "version_no": 7,
+      "generation_type": "excel",
+      "publish_status_dict_item_id": "7f02a520-55d2-4d7a-9886-c9b1f9d5c0ea",
+      "created_by_user_account_id": "3cdcb491-60b3-4fc9-bd81-dcda247f0f73",
+      "published_at": null
+    },
+    "batch": {
+      "id": "ed86d880-791c-49a1-9047-f90ee834d18d",
+      "processing_status": "completed",
+      "total_row_count": 6,
+      "success_row_count": 6,
+      "failed_row_count": 0,
+      "schedule_version_id": "6e4f14dc-a260-4f66-9b3c-f49d8d6d20f6",
+      "imported_by_user_account_id": "3cdcb491-60b3-4fc9-bd81-dcda247f0f73"
+    },
+    "scheduleCount": 6
+  },
+  "publish": {
+    "status": 200,
+    "body": {
+      "success": true,
+      "error_code": null,
+      "message": "schedule published",
+      "data": {
+        "schedule_version_id": "6e4f14dc-a260-4f66-9b3c-f49d8d6d20f6",
+        "published_at": "2026-04-18T08:32:40.175Z"
+      }
+    }
+  },
+  "publishVerification": {
+    "id": "6e4f14dc-a260-4f66-9b3c-f49d8d6d20f6",
+    "published_at": "2026-04-18T08:32:40.175+00:00",
+    "published_by_user_account_id": "3cdcb491-60b3-4fc9-bd81-dcda247f0f73",
+    "publish_status_dict_item_id": "88a5166b-02c9-4f5a-a6c9-a34365fdf22e"
+  },
+  "export": {
+    "status": 200,
+    "body": {
+      "file_name": "schedule-2026-04.xlsx",
+      "has_base64_content": true
+    }
+  },
+  "exportVerification": {
+    "sheetName": "排班导出",
+    "rowCount": 4
+  },
+  "shiftChange": {
+    "mode": "processed_guard",
+    "requestId": "b67b5690-ccac-47ce-844d-93df0ca2e9fc",
+    "response": {
+      "status": 409,
+      "body": {
+        "success": false,
+        "error_code": "SHIFT_CHANGE_ALREADY_PROCESSED",
+        "message": "该调班申请已处理，禁止重复审批"
+      }
+    }
+  },
+  "shiftChangeVerification": {
+    "id": "b67b5690-ccac-47ce-844d-93df0ca2e9fc",
+    "approved_at": "2026-04-18T08:32:22.399+00:00",
+    "approver_user_account_id": "3cdcb491-60b3-4fc9-bd81-dcda247f0f73",
+    "approval_comment": "business smoke validation"
+  },
+  "finishedAt": "2026-04-18T08:32:41.485Z",
+  "success": true
+}

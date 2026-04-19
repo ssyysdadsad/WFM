@@ -1,0 +1,117 @@
+{
+  "auth": {
+    "email": "2126787800@qq.com",
+    "authUserId": "ffffb187-2399-4575-b519-25b0935e96ea"
+  },
+  "importRes": {
+    "status": 200,
+    "body": {
+      "success": true,
+      "scheduleVersionId": "c21cdf6e-7771-4c06-8752-41a8a9d31ea0",
+      "batchId": "0570c048-8b44-441d-bc8b-3edbe9411aa0",
+      "importedRows": 6,
+      "failedRows": 0,
+      "errors": [],
+      "message": "导入成功"
+    }
+  },
+  "postCheck": {
+    "versionRow": {
+      "id": "c21cdf6e-7771-4c06-8752-41a8a9d31ea0",
+      "project_id": "098d7b05-ec0c-4a6d-aa7b-1060dd1e652d",
+      "schedule_month": "2026-04-01",
+      "version_no": 5,
+      "generation_type": "excel",
+      "publish_status_dict_item_id": "7f02a520-55d2-4d7a-9886-c9b1f9d5c0ea",
+      "created_by_user_account_id": "3cdcb491-60b3-4fc9-bd81-dcda247f0f73",
+      "remark": "通过 Excel 导入生成",
+      "published_at": null
+    },
+    "scheduleCount": 6,
+    "sampleSchedules": [
+      {
+        "schedule_date": "2026-04-01",
+        "planned_hours": 8,
+        "employee": {
+          "full_name": "张晨",
+          "employee_no": "EMP0001"
+        },
+        "code": {
+          "item_code": "rest",
+          "item_name": "休"
+        }
+      },
+      {
+        "schedule_date": "2026-04-01",
+        "planned_hours": 4,
+        "employee": {
+          "full_name": "李雅",
+          "employee_no": "EMP0002"
+        },
+        "code": {
+          "item_code": "training",
+          "item_name": "训"
+        }
+      },
+      {
+        "schedule_date": "2026-04-01",
+        "planned_hours": 8,
+        "employee": {
+          "full_name": "王敏",
+          "employee_no": "EMP0003"
+        },
+        "code": {
+          "item_code": "work_a",
+          "item_name": "作业A"
+        }
+      },
+      {
+        "schedule_date": "2026-04-02",
+        "planned_hours": 8,
+        "employee": {
+          "full_name": "张晨",
+          "employee_no": "EMP0001"
+        },
+        "code": {
+          "item_code": "work_a",
+          "item_name": "作业A"
+        }
+      },
+      {
+        "schedule_date": "2026-04-02",
+        "planned_hours": 8,
+        "employee": {
+          "full_name": "李雅",
+          "employee_no": "EMP0002"
+        },
+        "code": {
+          "item_code": "rest",
+          "item_name": "休"
+        }
+      },
+      {
+        "schedule_date": "2026-04-02",
+        "planned_hours": 4,
+        "employee": {
+          "full_name": "王敏",
+          "employee_no": "EMP0003"
+        },
+        "code": {
+          "item_code": "training",
+          "item_name": "训"
+        }
+      }
+    ],
+    "batchRow": {
+      "id": "0570c048-8b44-441d-bc8b-3edbe9411aa0",
+      "processing_status": "completed",
+      "total_row_count": 6,
+      "success_row_count": 6,
+      "failed_row_count": 0,
+      "schedule_version_id": "c21cdf6e-7771-4c06-8752-41a8a9d31ea0",
+      "imported_by_user_account_id": "3cdcb491-60b3-4fc9-bd81-dcda247f0f73",
+      "original_file_url": "import-demo.xlsx",
+      "completed_at": "2026-04-18T08:22:15.101+00:00"
+    }
+  }
+}

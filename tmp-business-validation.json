@@ -1,0 +1,34 @@
+{
+  "publish": {
+    "status": 409,
+    "body": {
+      "success": false,
+      "error_code": "SCHEDULE_VERSION_ALREADY_PUBLISHED",
+      "message": "该排班版本已发布，禁止重复发布"
+    }
+  },
+  "approve": {
+    "status": 409,
+    "body": {
+      "success": false,
+      "error_code": "SHIFT_CHANGE_ALREADY_PROCESSED",
+      "message": "该调班申请已处理，禁止重复审批"
+    }
+  },
+  "exportRes": {
+    "status": 400,
+    "body": {
+      "success": false,
+      "error_code": "22008",
+      "message": "date/time field value out of range: \"2026-04-31\""
+    }
+  },
+  "importRes": {
+    "status": 400,
+    "body": {
+      "success": false,
+      "error_code": "INVALID_EXCEL_TEMPLATE",
+      "message": "模板表头必须为：工号、姓名、部门、日期列"
+    }
+  }
+}
