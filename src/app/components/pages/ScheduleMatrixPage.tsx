@@ -331,10 +331,25 @@ export function ScheduleMatrixPage() {
   const stats = useMemo(() => {
     if (!dataLoaded) return null;
     const total = filteredEmployees.length;
-    const scheduled = new Set(visibleSchedules.map(s => s.employeeId)).size;
+    // 已排班 = 员工在项目周期内每一天都有排班记录
+    const totalDays = allDays.length;
+    // 按员工统计已排班的不重复天数
+    const empScheduledDays = new Map<string, Set<string>>();
+    for (const s of visibleSchedules) {
+      if (!empScheduledDays.has(s.employeeId)) {
+        empScheduledDays.set(s.employeeId, new Set());
+      }
+      empScheduledDays.get(s.employeeId)!.add(s.scheduleDate);
+    }
+    // 只有排满所有天数的才算"已排班"
+    let scheduled = 0;
+    for (const emp of filteredEmployees) {
+      const days = empScheduledDays.get(emp.id);
+      if (days && days.size >= totalDays) scheduled++;
+    }
     const unscheduled = total - scheduled;
     return { total, scheduled, unscheduled };
-  }, [filteredEmployees, visibleSchedules, dataLoaded]);
+  }, [filteredEmployees, visibleSchedules, allDays, dataLoaded]);
 
   // Build project labels with disambiguation for same-name projects
   const projectLabels = useMemo(() => {
