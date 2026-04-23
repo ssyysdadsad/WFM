@@ -1,0 +1,59 @@
+{
+  "pages": [
+    "pages/home/home",
+    "pages/schedule/schedule",
+    "pages/apply/apply",
+    "pages/announcement/announcement",
+    "pages/profile/profile",
+    "pages/login/login",
+    "pages/change-password/change-password"
+  ],
+  "window": {
+    "navigationBarBackgroundColor": "#2895FF",
+    "navigationBarTitleText": "WFM排班",
+    "navigationBarTextStyle": "white",
+    "backgroundColor": "#F6F8FA",
+    "backgroundTextStyle": "dark"
+  },
+  "tabBar": {
+    "color": "#A3B5C8",
+    "selectedColor": "#2895FF",
+    "backgroundColor": "#FFFFFF",
+    "borderStyle": "white",
+    "list": [
+      {
+        "pagePath": "pages/home/home",
+        "text": "首页",
+        "iconPath": "assets/tab-home.png",
+        "selectedIconPath": "assets/tab-home-active.png"
+      },
+      {
+        "pagePath": "pages/schedule/schedule",
+        "text": "排班",
+        "iconPath": "assets/tab-schedule.png",
+        "selectedIconPath": "assets/tab-schedule-active.png"
+      },
+      {
+        "pagePath": "pages/apply/apply",
+        "text": "申请",
+        "iconPath": "assets/tab-apply.png",
+        "selectedIconPath": "assets/tab-apply-active.png"
+      },
+      {
+        "pagePath": "pages/announcement/announcement",
+        "text": "公告",
+        "iconPath": "assets/tab-announcement.png",
+        "selectedIconPath": "assets/tab-announcement-active.png"
+      },
+      {
+        "pagePath": "pages/profile/profile",
+        "text": "我的",
+        "iconPath": "assets/tab-profile.png",
+        "selectedIconPath": "assets/tab-profile-active.png"
+      }
+    ]
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json",
+  "lazyCodeLoading": "requiredComponents"
+}

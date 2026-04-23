@@ -1,0 +1,51 @@
+<view class="profile-page">
+  <!-- Header -->
+  <view class="prof-header header-gradient" style="padding:40rpx 40rpx 64rpx;">
+    <view class="deco-circle-1"></view>
+    <view class="deco-circle-2"></view>
+    <text class="prof-header-title">个人信息中心</text>
+    <view class="flex-row gap-md" style="position:relative;z-index:10;">
+      <view class="prof-avatar">😊</view>
+      <view>
+        <text class="prof-name">{{employee.name || '—'}}</text>
+        <text class="prof-sub">工号: {{employee.no}} | {{employee.department}} | {{employee.position || '—'}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="prof-content">
+    <!-- 个人信息 -->
+    <view class="card" style="padding:0;">
+      <view class="section-title" style="padding:24rpx 32rpx 12rpx;">
+        <view class="bar bar-blue"></view><text>个人信息</text>
+      </view>
+      <view class="info-row"><text class="label">工号</text><text class="value">{{employee.no || '—'}}</text></view>
+      <view class="info-row"><text class="label">姓名</text><text class="value">{{employee.name || '—'}}</text></view>
+      <view class="info-row"><text class="label">部门</text><text class="value">{{employee.department || '—'}}</text></view>
+      <view class="info-row"><text class="label">岗位</text><text class="value">{{employee.position || '—'}}</text></view>
+      <view class="info-row"><text class="label">联系方式</text><text class="value">{{employee.phone || '—'}}</text></view>
+    </view>
+
+    <!-- 详细信息 -->
+    <view class="card card-purple" style="padding:0;">
+      <view class="section-title" style="padding:24rpx 32rpx 12rpx;">
+        <view class="bar bar-purple"></view><text>详细信息</text>
+      </view>
+      <view class="info-row"><text class="label">入职时间</text><text class="value">{{employee.onboardDate || '—'}}</text></view>
+      <view class="info-row"><text class="label">工龄</text><text class="value">{{workAge}}</text></view>
+    </view>
+
+    <!-- Actions -->
+    <button class="btn-primary" style="margin-bottom:20rpx;" bindtap="goChangePassword">
+      <text>🔒 修改密码</text>
+    </button>
+
+    <button class="btn-outline" bindtap="handleLogout">
+      <text>🚪 退出登录</text>
+    </button>
+  </view>
+
+  <view wx:if="{{loading}}" class="loading-center" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(255,255,255,0.7);z-index:99;">
+    <text style="color:#2895FF;">加载中...</text>
+  </view>
+</view>

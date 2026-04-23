@@ -1,0 +1,122 @@
+<view class="home-page">
+  <!-- Header -->
+  <view class="header header-gradient">
+    <view class="deco-circle-1"></view>
+    <view class="header-top flex-row">
+      <view class="flex-row gap-sm">
+        <view class="brand-icon">CM</view>
+        <text class="brand-name">WFM</text>
+        <view class="pro-tag">PRO</view>
+      </view>
+      <view class="flex-row gap-sm">
+        <text class="user-name">{{employee.name || '用户'}}</text>
+        <view class="avatar">{{nameInitial}}</view>
+      </view>
+    </view>
+
+    <!-- 日期 + 今日班次 -->
+    <view class="header-date-row">
+      <text class="header-date">{{currentYear}}年{{currentMonth}}月{{todayDay}}日 周{{weekdayName}}</text>
+      <view class="header-shift-tag" wx:if="{{todayCode !== '休'}}">
+        <text>{{todayCode}} {{todayTime}}</text>
+      </view>
+      <view class="header-shift-tag rest-tag" wx:else>
+        <text>休息</text>
+      </view>
+    </view>
+
+    <!-- 迷你月历 -->
+    <view class="mini-cal">
+      <view class="mini-cal-header">
+        <text class="mini-cal-weekday" wx:for="{{['日','一','二','三','四','五','六']}}" wx:key="*this">{{item}}</text>
+      </view>
+      <view class="mini-cal-body">
+        <view wx:for="{{calendarDays}}" wx:key="index"
+          class="mini-cal-cell {{item.isToday ? 'is-today' : ''}} {{!item.day ? 'empty' : ''}}">
+          <text>{{item.day || ''}}</text>
+        </view>
+      </view>
+    </view>
+
+    <!-- 本月工时 bar -->
+    <view class="hours-bar">
+      <text class="hours-bar-text">本月工时: {{totalHours}}h ({{workDays}}天)</text>
+      <view class="hours-bar-right">
+        <view class="hours-bar-badge">排班出勤 ✓</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="content">
+    <!-- 今日班次卡片 -->
+    <view class="card today-card">
+      <view class="section-header">
+        <text class="section-title-text">今日班次</text>
+        <view wx:if="{{todaySchedule && todaySchedule.category !== 'rest'}}" class="shift-tag" style="background:{{todayStyle.bg}};color:{{todayStyle.text}};">
+          {{todayCode}} {{todayTime}}
+        </view>
+      </view>
+      <view wx:if="{{todaySchedule}}" class="today-info">
+        <view class="info-line">
+          <text class="info-label">地点：</text>
+          <text class="info-value">{{todaySchedule.project || '待安排'}}</text>
+        </view>
+        <view class="info-line">
+          <text class="info-label">部门：</text>
+          <text class="info-value">{{employee.department || '-'}}</text>
+        </view>
+        <view class="info-line">
+          <text class="info-label">时长：</text>
+          <text class="info-value">{{todaySchedule.hours || 0}} 小时</text>
+        </view>
+      </view>
+      <view wx:else class="today-rest">
+        <text class="rest-text">休息 · 今日无排班</text>
+      </view>
+      <view class="detail-btn" bindtap="goSchedule">
+        <text>查看详情</text>
+      </view>
+    </view>
+
+    <!-- 未来五日班次 -->
+    <view class="section-header-standalone">
+      <text class="section-title-text">未来五日班次</text>
+    </view>
+    <view class="future-grid">
+      <view wx:for="{{futureDays}}" wx:key="day" class="future-card">
+        <text class="future-date-text">{{item.day}}日 周{{item.weekday}}</text>
+        <view wx:if="{{item.style.category !== 'rest' && item.style.category !== 'leave'}}" class="shift-tag small" style="background:{{item.style.bg}};color:{{item.style.text}};">
+          {{item.shift}} {{item.time}}
+        </view>
+        <view wx:else class="shift-tag small rest-shift-tag">
+          休息
+        </view>
+        <text wx:if="{{item.project}}" class="future-project">地点：{{item.project}}</text>
+      </view>
+    </view>
+
+    <!-- 快捷操作 -->
+    <view class="action-grid">
+      <view class="action-btn action-blue" bindtap="goApply">
+        <text class="action-icon">⚡</text>
+        <text class="action-label">申请中心</text>
+      </view>
+      <view class="action-btn action-green" bindtap="goAnnouncement">
+        <text class="action-icon">⚡</text>
+        <text class="action-label">查看公告</text>
+      </view>
+      <view class="action-btn action-orange" bindtap="goSchedule">
+        <text class="action-icon">⚡</text>
+        <text class="action-label">排班详情</text>
+      </view>
+      <view class="action-btn action-purple" bindtap="goProfile">
+        <text class="action-icon">⚡</text>
+        <text class="action-label">我的信息</text>
+      </view>
+    </view>
+  </view>
+
+  <view wx:if="{{loading}}" class="loading-overlay">
+    <view class="loading-spinner"></view>
+  </view>
+</view>

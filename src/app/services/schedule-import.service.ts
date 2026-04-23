@@ -3,6 +3,7 @@ import { supabase, supabaseUrl, publicAnonKey } from '@/app/lib/supabase/client'
 import { AppError, toAppError } from '@/app/lib/supabase/errors';
 import { parseScheduleWorkbook } from '@/app/lib/schedule/excel';
 import { bulkUpsertScheduleCells, loadScheduleMatrixReferences, resolveShiftTypeDictItemId } from '@/app/services/schedule.service';
+import { validateScheduleBatch } from '@/app/services/labor-rule.service';
 import type { ScheduleCellChange } from '@/app/types/schedule';
 import type {
   ScheduleImportBatchRecord,
@@ -158,7 +159,33 @@ export async function listScheduleImportBatches() {
     throw toAppError(error, '加载导入批次失败');
   }
 
-  return (data || []).map(mapBatch);
+  const STALE_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes
+  const now = Date.now();
+  const staleIds: string[] = [];
+
+  const mapped = (data || []).map((row) => {
+    const batch = mapBatch(row);
+    // Detect stale "processing" records
+    if (batch.processingStatus === 'processing' && batch.createdAt) {
+      const elapsed = now - new Date(batch.createdAt).getTime();
+      if (elapsed > STALE_THRESHOLD_MS) {
+        batch.processingStatus = 'failed';
+        staleIds.push(batch.id);
+      }
+    }
+    return batch;
+  });
+
+  // Fire-and-forget: fix stale records in DB
+  if (staleIds.length > 0) {
+    supabase
+      .from('schedule_import_batch')
+      .update({ processing_status: 'failed', completed_at: new Date().toISOString() })
+      .in('id', staleIds)
+      .then(() => { /* silently fixed */ });
+  }
+
+  return mapped;
 }
 
 export async function importScheduleExcel(params: {
@@ -218,11 +245,32 @@ export async function importScheduleExcel(params: {
       ]),
     );
     const codeMap = new Map(
-      refs.codeItems.flatMap((item) => [
-        [item.itemCode, item],
-        [item.itemName, item],
-      ]),
+      refs.codeItems.flatMap((item) => {
+        const keys: [string, typeof item][] = [
+          [item.itemCode, item],
+          [item.itemName, item],
+        ];
+        // Also match by excel_code if set
+        const excelCode = item.extraConfig?.excel_code;
+        if (excelCode) keys.push([String(excelCode), item]);
+        // Also match by any alias
+        try {
+          const aliases = item.extraConfig?.aliases;
+          const arr = typeof aliases === 'string' ? JSON.parse(aliases) : aliases;
+          if (Array.isArray(arr)) {
+            arr.forEach((a: string) => { if (a) keys.push([String(a).trim(), item]); });
+          }
+        } catch { /* ignore */ }
+        return keys;
+      }),
     );
+
+    // Resolve planned hours directly from schedule_code extra_config
+    function resolveImportHours(codeItem: any): number {
+      const extra = codeItem?.extraConfig || {};
+      if (extra.planned_hours != null) return Number(extra.planned_hours);
+      return Number(extra.standard_hours || 8);
+    }
 
     const errors: ScheduleImportError[] = [...parsed.errors];
     const changes: ScheduleCellChange[] = [];
@@ -260,7 +308,7 @@ export async function importScheduleExcel(params: {
           scheduleDate: assignment.scheduleDate,
           scheduleCodeDictItemId: codeItem.id,
           shiftTypeDictItemId: resolveShiftTypeDictItemId(codeItem),
-          plannedHours: Number(codeItem.extraConfig?.standard_hours || 8),
+          plannedHours: resolveImportHours(codeItem),
           sourceType: 'excel',
           remark: `导入批次 ${batchId}`,
         });
@@ -272,6 +320,40 @@ export async function importScheduleExcel(params: {
         scheduleVersionId: versionId,
         changes,
       });
+    }
+
+    // Labor rule validation on imported data
+    let laborRuleWarnings: ScheduleImportResult['laborRuleWarnings'] = undefined;
+    if (changes.length > 0) {
+      try {
+        // Build employee name map for readable messages
+        const empNameMap = new Map<string, string>();
+        refs.employees.forEach(e => { empNameMap.set(e.id, e.fullName); });
+
+        // Build code category map
+        const codeCategoryMap = new Map<string, string>();
+        refs.codeItems.forEach(c => {
+          codeCategoryMap.set(c.id, c.extraConfig?.category || 'work');
+        });
+
+        const entries = changes.map(c => ({
+          employeeId: c.employeeId,
+          employeeName: empNameMap.get(c.employeeId) || c.employeeId.substring(0, 6),
+          date: c.scheduleDate,
+          plannedHours: c.plannedHours || 0,
+          isWorkDay: codeCategoryMap.get(c.scheduleCodeDictItemId) === 'work',
+        }));
+
+        const validationResult = await validateScheduleBatch(entries, params.projectId);
+        if (validationResult.hardViolations.length > 0 || validationResult.softViolations.length > 0) {
+          laborRuleWarnings = {
+            hardViolations: validationResult.hardViolations.map(v => ({ message: v.message, ruleName: v.ruleName })),
+            softViolations: validationResult.softViolations.map(v => ({ message: v.message, ruleName: v.ruleName })),
+          };
+        }
+      } catch {
+        // Validation errors don't block the import
+      }
     }
 
     await updateImportBatch(batchId, {
@@ -290,6 +372,7 @@ export async function importScheduleExcel(params: {
       failedRows: errors.length,
       errors,
       message: errors.length > 0 ? '导入完成，但存在部分错误' : '导入成功',
+      laborRuleWarnings,
     } satisfies ScheduleImportResult;
   } catch (error) {
     await updateImportBatch(batchId, {

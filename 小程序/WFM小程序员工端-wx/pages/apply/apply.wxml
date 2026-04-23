@@ -1,0 +1,262 @@
+<wxs module="util">
+module.exports.firstChar = function(str, fallback) {
+  var s = str || fallback || '用'
+  return s.charAt(0)
+}
+</wxs>
+
+<view class="apply-page">
+  <!-- Top tabs: 3 tabs now -->
+  <view class="tab-bar">
+    <view class="tab {{activeTab === 'list' ? 'active' : ''}}" bindtap="switchTab" data-tab="list">申请记录</view>
+    <view class="tab {{activeTab === 'new' ? 'active' : ''}}" bindtap="switchTab" data-tab="new">新建申请</view>
+    <view class="tab {{activeTab === 'urgent' ? 'active' : ''}}" bindtap="switchTab" data-tab="urgent">
+      紧急班次
+      <view wx:if="{{urgentShifts.length > 0}}" class="badge">{{urgentShifts.length}}</view>
+    </view>
+  </view>
+
+  <!-- ========== LIST TAB ========== -->
+  <view wx:if="{{activeTab === 'list'}}" class="container">
+    <view wx:if="{{loading}}" class="loading-center"><text style="color:#2895FF;">加载中...</text></view>
+    <view wx:elif="{{requests.length === 0}}" class="empty-state">
+      <text style="font-size:60rpx;">📋</text>
+      <text style="color:#A3B5C8;font-size:26rpx;margin-top:16rpx;">暂无申请记录</text>
+    </view>
+    <view wx:else>
+      <view wx:for="{{requests}}" wx:key="id" class="card request-card">
+        <view class="req-header">
+          <text class="tag" style="background:{{item.statusBg}};color:{{item.statusColor}};">{{item.statusLabel}}</text>
+          <text class="req-type-tag">{{item.typeLabel}}</text>
+          <text class="req-time">{{item.createdAt}}</text>
+        </view>
+        <view class="req-body">
+          <text class="req-label">原班：{{item.originalDate}} {{item.originalShift}}</text>
+          <text wx:if="{{item.targetDate}}" class="req-label">调至：{{item.targetDate}} {{item.targetShift}}</text>
+          <text wx:if="{{item.targetEmployeeName}}" class="req-label">对调人：{{item.targetEmployeeName}}</text>
+          <text class="req-reason">原因：{{item.reason}}</text>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <!-- ========== NEW APPLY TAB ========== -->
+  <view wx:if="{{activeTab === 'new'}}" class="container">
+    <!-- Applicant info -->
+    <view class="applicant-card">
+      <text class="applicant-line">当前申请人：<text class="applicant-bold">{{employee.name}} / {{employee.department}} /</text></text>
+      <text class="applicant-hint">审批人配置：排班主管，结果会同步员工端</text>
+    </view>
+
+    <!-- Request type tabs -->
+    <view class="type-tabs">
+      <view class="type-tab {{requestType === 'direct_change' ? 'active-outline' : ''}}" bindtap="switchRequestType" data-type="direct_change">直接变更</view>
+      <view class="type-tab {{requestType === 'swap' ? 'active-fill' : ''}}" bindtap="switchRequestType" data-type="swap">互换调班</view>
+    </view>
+
+    <!-- Alert messages -->
+    <view wx:if="{{formSuccess}}" class="alert-success">{{formSuccess}}</view>
+    <view wx:if="{{formError}}" class="alert-error">{{formError}}</view>
+
+    <!-- ===== DIRECT CHANGE FORM ===== -->
+    <block wx:if="{{requestType === 'direct_change'}}">
+      <view class="form-row">
+        <view class="form-col">
+          <text class="field-label">原排班日期</text>
+          <picker mode="date" value="{{formOrigDate}}" bindchange="onOrigDateChange">
+            <view class="input-box">
+              <text class="{{formOrigDate ? 'input-value' : 'input-placeholder'}}">{{formOrigDate || '选择日期'}}</text>
+              <text class="input-icon">📅</text>
+            </view>
+          </picker>
+        </view>
+        <view class="form-col">
+          <text class="field-label">我的班次</text>
+          <view class="input-box">
+            <text class="input-value">{{myShiftCode || '自动获取'}}</text>
+          </view>
+        </view>
+      </view>
+
+      <text class="field-label">目标日期（可选）</text>
+      <picker mode="date" value="{{formTargetDate}}" bindchange="onTargetDateChange">
+        <view class="input-box">
+          <text class="{{formTargetDate ? 'input-value' : 'input-placeholder'}}">{{formTargetDate || '请选择目标日期'}}</text>
+          <text class="input-icon">📅</text>
+        </view>
+      </picker>
+
+      <text class="field-label">目标班次</text>
+      <picker range="{{shiftOptions}}" range-key="label" value="{{shiftPickerIndex}}" bindchange="onShiftPickerChange">
+        <view class="input-box">
+          <text class="{{formTargetShiftLabel ? 'input-value' : 'input-placeholder'}}">{{formTargetShiftLabel || '选择班次'}}</text>
+        </view>
+      </picker>
+    </block>
+
+    <!-- ===== SWAP FORM ===== -->
+    <block wx:elif="{{requestType === 'swap'}}">
+      <view class="form-row">
+        <view class="form-col">
+          <text class="field-label">原排班日期</text>
+          <picker mode="date" value="{{formOrigDate}}" bindchange="onOrigDateChange">
+            <view class="input-box">
+              <text class="{{formOrigDate ? 'input-value' : 'input-placeholder'}}">{{formOrigDate || '选择日期'}}</text>
+              <text class="input-icon">📅</text>
+            </view>
+          </picker>
+        </view>
+        <view class="form-col">
+          <text class="field-label">我的班次</text>
+          <view class="input-box">
+            <text class="input-value">{{myShiftCode || '自动获取'}}</text>
+          </view>
+        </view>
+      </view>
+
+      <text class="field-label">选择调班对象（该日期休息的员工）</text>
+      <picker range="{{targetEmployeeOptions}}" range-key="label" value="{{targetEmpPickerIndex}}" bindchange="onTargetEmpChange">
+        <view class="input-box">
+          <text class="{{formTargetEmpName ? 'input-value' : 'input-placeholder'}}">{{formTargetEmpName || '请选择被调班者'}}</text>
+        </view>
+      </picker>
+
+      <view class="swap-arrow">
+        <text class="swap-icon">⇅</text>
+      </view>
+
+      <view class="form-row">
+        <view class="form-col">
+          <text class="field-label">换回排班日期</text>
+          <picker mode="date" value="{{formTargetDate}}" bindchange="onTargetDateChange">
+            <view class="input-box">
+              <text class="{{formTargetDate ? 'input-value' : 'input-placeholder'}}">{{formTargetDate || '请先选择调班对象'}}</text>
+              <text class="input-icon">📅</text>
+            </view>
+          </picker>
+        </view>
+        <view class="form-col">
+          <text class="field-label">对方班次</text>
+          <view class="input-box {{targetShiftIsRest ? 'input-error' : ''}}">
+            <text class="{{formTargetShiftLabel ? 'input-value' : 'input-placeholder'}}" style="{{targetShiftIsRest ? 'color:#D96B5A;' : ''}}">{{formTargetShiftLabel || '自动获取'}}</text>
+          </view>
+          <text wx:if="{{targetShiftIsRest}}" class="field-error">休息日无法互换</text>
+        </view>
+      </view>
+    </block>
+
+    <!-- Reason -->
+    <text class="field-label" style="margin-top:24rpx;">调班事由</text>
+    <view class="textarea-box">
+      <textarea placeholder="请输入调班原因..." value="{{formReason}}" bindinput="onReasonInput"
+        placeholder-class="input-placeholder" auto-height maxlength="200" />
+    </view>
+
+    <!-- Submit -->
+    <button class="submit-btn" bindtap="handleSubmit" disabled="{{submitting}}">
+      <text>{{submitting ? '提交中...' : '提交申请'}}</text>
+    </button>
+  </view>
+
+  <!-- ========== URGENT SHIFT TAB ========== -->
+  <view wx:if="{{activeTab === 'urgent'}}" class="container">
+    <!-- 我的报名记录 -->
+    <view wx:if="{{mySignups.length > 0}}" class="urgent-section">
+      <text class="section-title">📝 我的报名记录</text>
+      <view wx:for="{{mySignups}}" wx:key="id" class="card urgent-signup-card">
+        <view class="req-header">
+          <text class="tag" style="background:{{item.statusBg}};color:{{item.statusColor}};">{{item.statusLabel}}</text>
+          <text class="req-time">{{item.signupTime}}</text>
+        </view>
+        <view class="req-body">
+          <text class="req-label urgent-title-text">{{item.shiftTitle}}</text>
+          <text class="req-label">📅 {{item.shiftDate}} {{item.timeRange}}</text>
+          <text wx:if="{{item.projectName}}" class="req-label">📍 {{item.projectName}}</text>
+          <text wx:if="{{item.remark}}" class="req-reason">备注：{{item.remark}}</text>
+        </view>
+      </view>
+    </view>
+
+    <!-- 可报名的紧急班次 -->
+    <text class="section-title" style="margin-top:16rpx;">🔥 可报名的紧急班次</text>
+
+    <view wx:if="{{urgentLoading}}" class="loading-center"><text style="color:#2895FF;">加载中...</text></view>
+    <view wx:elif="{{urgentShifts.length === 0}}" class="empty-state">
+      <text style="font-size:60rpx;">✅</text>
+      <text style="color:#A3B5C8;font-size:26rpx;margin-top:16rpx;">暂无可报名的紧急班次</text>
+    </view>
+    <view wx:else>
+      <view wx:for="{{urgentShifts}}" wx:key="id" class="card urgent-card">
+        <view class="urgent-header">
+          <view class="urgent-badge">紧急</view>
+          <text class="urgent-title">{{item.title}}</text>
+        </view>
+        <view class="urgent-body">
+          <view class="urgent-info-row">
+            <text class="urgent-info-icon">📅</text>
+            <text class="urgent-info-text">{{item.shiftDate}}</text>
+          </view>
+          <view class="urgent-info-row">
+            <text class="urgent-info-icon">⏰</text>
+            <text class="urgent-info-text">{{item.startTime}} - {{item.endTime}}</text>
+          </view>
+          <view wx:if="{{item.projectName}}" class="urgent-info-row">
+            <text class="urgent-info-icon">📍</text>
+            <text class="urgent-info-text">{{item.projectName}}</text>
+          </view>
+          <view wx:if="{{item.skillName}}" class="urgent-info-row">
+            <text class="urgent-info-icon">🎯</text>
+            <text class="urgent-info-text">要求技能：{{item.skillName}}</text>
+          </view>
+          <view class="urgent-info-row">
+            <text class="urgent-info-icon">👥</text>
+            <text class="urgent-info-text">需 {{item.requiredCount}} 人 · 已报 {{item.signupCount}} 人</text>
+          </view>
+          <view class="urgent-info-row">
+            <text class="urgent-info-icon">⏳</text>
+            <text class="urgent-info-text">截止：{{item.deadline}}</text>
+          </view>
+          <view wx:if="{{item.description}}" class="urgent-desc">
+            <text>{{item.description}}</text>
+          </view>
+          <!-- 用工规则警告 -->
+          <view wx:if="{{item.laborWarnings.length > 0}}" class="labor-warnings">
+            <view wx:for="{{item.laborWarnings}}" wx:for-item="warn" wx:key="*this" class="labor-warning-item">
+              <text>{{warn}}</text>
+            </view>
+          </view>
+        </view>
+        <view class="urgent-actions">
+          <view wx:if="{{item.alreadySignedUp}}" class="urgent-btn-disabled">
+            <text>已报名</text>
+          </view>
+          <view wx:elif="{{item.hasConflict}}" class="urgent-btn-conflict">
+            <text>时间冲突</text>
+          </view>
+          <view wx:else class="urgent-btn" bindtap="onSignupUrgent" data-id="{{item.id}}" data-title="{{item.title}}">
+            <text>我要报名</text>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <!-- Signup modal -->
+    <view wx:if="{{showSignupModal}}" class="modal-overlay" bindtap="closeSignupModal">
+      <view class="modal-content" catchtap="">
+        <text class="modal-title">确认报名</text>
+        <text class="modal-desc">确认报名「{{signupShiftTitle}}」？</text>
+        <view class="textarea-box" style="margin-top:16rpx;">
+          <textarea placeholder="备注说明（选填）..." value="{{signupRemark}}" bindinput="onSignupRemarkInput"
+            placeholder-class="input-placeholder" auto-height maxlength="200" />
+        </view>
+        <view wx:if="{{signupError}}" class="alert-error" style="margin-top:12rpx;">{{signupError}}</view>
+        <view class="modal-btns">
+          <button class="modal-btn-cancel" bindtap="closeSignupModal">取消</button>
+          <button class="modal-btn-confirm" bindtap="confirmSignup" disabled="{{signupSubmitting}}">
+            {{signupSubmitting ? '提交中...' : '确认报名'}}
+          </button>
+        </view>
+      </view>
+    </view>
+  </view>
+</view>

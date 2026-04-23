@@ -57,26 +57,56 @@ export function AuthProvider({ children }: React.PropsWithChildren) {
     async function bootstrap() {
       setLoading(true);
 
-      if (authMode === 'supabase') {
-        setMockUsers([]);
-        const { data } = await supabase.auth.getSession();
-        await syncSupabaseSessionUser(data.session?.user?.id ?? null);
+      try {
+        if (authMode === 'supabase') {
+          console.log('[Auth] 走真实的 supabase getSession...');
+          setMockUsers([]);
+          
+          let data, error;
+          try {
+            const result = await Promise.race([
+              supabase.auth.getSession(),
+              new Promise<{ data: any; error: any }>((resolve) =>
+                setTimeout(() => resolve({ data: { session: null }, error: new Error('getSession Timeout 3000ms') }), 3000)
+              )
+            ]);
+            data = result.data;
+            error = result.error;
+          } catch (e) {
+            error = e;
+          }
+
+          if (error) {
+            console.error('[Auth] 获取 supabase 会话出现问题或超时:', error);
+          }
+
+          console.log('[Auth] 同步会话 user_id:', data?.session?.user?.id ?? null);
+          const syncPromise = syncSupabaseSessionUser(data?.session?.user?.id ?? null);
+          await Promise.race([
+            syncPromise,
+            new Promise((resolve) => setTimeout(() => {
+              console.error('[Auth] syncSupabaseSessionUser 超时!');
+              resolve(null);
+            }, 3000))
+          ]);
+          
+          console.log('[Auth] supabase init 完成');
+          return;
+        }
+
+        const users = await refreshMockUsers();
+        const storedUserId = readMockSessionUserId();
+
+        if (active && storedUserId) {
+          const matchedUser = users.find((item) => item.id === storedUserId);
+          setCurrentUser(matchedUser?.user ?? null);
+        }
+      } catch (error) {
+        console.error('Auth context bootstrap error:', error);
+      } finally {
         if (active) {
           setLoading(false);
         }
-        return;
-      }
-
-      const users = await refreshMockUsers();
-      const storedUserId = readMockSessionUserId();
-
-      if (active && storedUserId) {
-        const matchedUser = users.find((item) => item.id === storedUserId);
-        setCurrentUser(matchedUser?.user ?? null);
-      }
-
-      if (active) {
-        setLoading(false);
       }
     }
 
@@ -120,12 +150,22 @@ export function AuthProvider({ children }: React.PropsWithChildren) {
   }, [mockUsers]);
 
   const loginWithPassword = useCallback(async (email: string, password: string) => {
-    setLoading(true);
+    console.log('[Auth] 表单发起 loginWithPassword 请求，开始 10秒 计时赛...', email);
+    
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error('系统鉴权或本地网络通讯响应超过 10 秒，已强制切断死锁。请检查网络状态或按 F12 查看报错日志。')), 10000);
+    });
+
     try {
-      const user = await loginWithSupabasePassword(email, password);
+      const user = await Promise.race([
+        loginWithSupabasePassword(email, password),
+        timeoutPromise
+      ]);
+      console.log('[Auth] 登录校验成功，正在绑定用户信息:', user);
       setCurrentUser(user);
-    } finally {
-      setLoading(false);
+    } catch (error) {
+      console.error('[Auth] 登录校验过程中发生异常截断:', error);
+      throw error;
     }
   }, []);
 

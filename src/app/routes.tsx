@@ -13,11 +13,14 @@ import { SkillPage } from './components/pages/SkillPage';
 import { LaborRulePage } from './components/pages/LaborRulePage';
 import { ScheduleVersionPage } from './components/pages/ScheduleVersionPage';
 import { ScheduleMatrixPage } from './components/pages/ScheduleMatrixPage';
+import { EmployeeScheduleDetailPage } from './components/pages/EmployeeScheduleDetailPage';
 import { ShiftChangePage } from './components/pages/ShiftChangePage';
 import { ReportPage } from './components/pages/ReportPage';
 import { AnnouncementPage } from './components/pages/AnnouncementPage';
 import { LoginPage } from './components/auth/LoginPage';
 import { ProtectedRoute } from './components/auth/ProtectedRoute';
+import { AccountPermissionPage } from './components/pages/AccountPermissionPage';
+import { UrgentShiftPage } from './components/pages/UrgentShiftPage';
 
 function ProtectedAppLayout() {
   return (
@@ -49,9 +52,12 @@ export const router = createBrowserRouter([
       { path: 'labor-rule', Component: LaborRulePage },
       { path: 'schedule-version', Component: ScheduleVersionPage },
       { path: 'schedule', Component: ScheduleMatrixPage },
+      { path: 'schedule/employee/:employeeId', Component: EmployeeScheduleDetailPage },
       { path: 'shift-change', Component: ShiftChangePage },
       { path: 'report', Component: ReportPage },
       { path: 'announcement', Component: AnnouncementPage },
+      { path: 'account-permission', Component: AccountPermissionPage },
+      { path: 'urgent-shift', Component: UrgentShiftPage },
       { path: '*', Component: () => <div style={{ textAlign: 'center', padding: 60 }}>页面未找到</div> },
     ],
   },

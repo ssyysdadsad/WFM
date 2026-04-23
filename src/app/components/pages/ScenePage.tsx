@@ -8,9 +8,9 @@ export function ScenePage() {
       tableName="scene"
       searchField="scene_name"
       columns={[
-        { key: 'scene_code', title: '场景编码', required: true },
+        { key: 'scene_code', title: '场景编码', autoCode: 'SCN', hideInTable: true },
         { key: 'scene_name', title: '场景名称', required: true },
-        { key: 'location', title: '场景地点' },
+        { key: 'scene_location', title: '场景地点' },
         { key: 'description', title: '描述', type: 'textarea', hideInTable: true },
         { key: 'is_enabled', title: '是否启用', type: 'boolean' },
       ]}

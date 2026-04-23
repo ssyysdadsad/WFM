@@ -9,6 +9,7 @@ export type ScheduleVersionRecord = {
   publishedAt?: string | null;
   publishedByUserAccountId?: string | null;
   remark?: string | null;
+  isActive?: boolean;
 };
 
 export type ScheduleVersionFormValues = {

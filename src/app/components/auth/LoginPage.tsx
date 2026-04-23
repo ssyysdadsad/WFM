@@ -1,12 +1,13 @@
 import { useMemo, useState } from 'react';
-import { Alert, Button, Card, Flex, Form, Input, List, Space, Tag, Typography } from 'antd';
+import { Alert, Button, Card, Flex, Form, Input, List, Space, Tag, Typography, Spin } from 'antd';
 import { UserOutlined } from '@ant-design/icons';
 import { Navigate } from 'react-router';
 import { useCurrentUser } from '@/app/hooks/useCurrentUser';
 
 export function LoginPage() {
-  const { authMode, currentUser, loading, mockUsers, loginAsUser, loginWithPassword } = useCurrentUser();
+  const { authMode, currentUser, loading: appLoading, mockUsers, loginAsUser, loginWithPassword } = useCurrentUser();
   const [loginError, setLoginError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const sortedUsers = useMemo(
     () =>
@@ -24,13 +25,24 @@ export function LoginPage() {
     return <Navigate to="/" replace />;
   }
 
+  // 若 App 初始化 Auth 仍在进行中，则用全局 Spin 进行阻断
+  if (appLoading) {
+    return (
+      <Flex align="center" justify="center" style={{ minHeight: '100vh', background: '#f5f7fa' }}>
+        <Spin size="large" tip="正在初始化环境..." />
+      </Flex>
+    );
+  }
+
   async function handleSupabaseLogin(values: { email: string; password: string }) {
     setLoginError(null);
-
+    setIsSubmitting(true);
     try {
       await loginWithPassword(values.email, values.password);
     } catch (error) {
       setLoginError(error instanceof Error ? error.message : '登录失败');
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
@@ -50,7 +62,7 @@ export function LoginPage() {
           </div>
 
           {authMode === 'supabase' ? (
-            <Form layout="vertical" onFinish={handleSupabaseLogin} disabled={loading}>
+            <Form layout="vertical" onFinish={handleSupabaseLogin} disabled={isSubmitting}>
               {loginError ? <Alert type="error" showIcon title={loginError} style={{ marginBottom: 16 }} /> : null}
 
               <Form.Item
@@ -58,7 +70,7 @@ export function LoginPage() {
                 name="email"
                 rules={[{ required: true, message: '请输入邮箱' }, { type: 'email', message: '请输入合法邮箱地址' }]}
               >
-                <Input placeholder="请输入 Supabase Auth 邮箱" autoComplete="username" />
+                <Input placeholder="请输入 Supabase Auth 邮箱" autoComplete="username" size="large" />
               </Form.Item>
 
               <Form.Item
@@ -66,16 +78,16 @@ export function LoginPage() {
                 name="password"
                 rules={[{ required: true, message: '请输入密码' }]}
               >
-                <Input.Password placeholder="请输入密码" autoComplete="current-password" />
+                <Input.Password placeholder="请输入密码" autoComplete="current-password" size="large" />
               </Form.Item>
 
-              <Button type="primary" htmlType="submit" loading={loading} block>
+              <Button type="primary" htmlType="submit" loading={isSubmitting} block size="large">
                 登录系统
               </Button>
             </Form>
           ) : (
             <List
-              loading={loading}
+              loading={appLoading}
               itemLayout="horizontal"
               dataSource={sortedUsers}
               renderItem={(item) => (

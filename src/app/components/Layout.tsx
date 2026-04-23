@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Layout as AntLayout, Menu, theme, Avatar, Dropdown, Button } from 'antd';
+import { Layout as AntLayout, Menu, theme, Avatar, Dropdown, Button, Breadcrumb } from 'antd';
 import {
   DashboardOutlined,
   BookOutlined,
@@ -20,6 +20,9 @@ import {
   MenuUnfoldOutlined,
   SettingOutlined,
   LogoutOutlined,
+  LockOutlined,
+  HomeOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons';
 import { Outlet, useNavigate, useLocation } from 'react-router';
 import { usePermission } from '@/app/hooks/usePermission';
@@ -60,22 +63,29 @@ const menuItems = [
       { key: '/schedule-version', icon: <CalendarOutlined />, label: '排班版本', moduleCode: 'schedule_version' },
       { key: '/schedule', icon: <CalendarOutlined />, label: '排班矩阵', moduleCode: 'schedule' },
       { key: '/shift-change', icon: <SwapOutlined />, label: '调班审批', moduleCode: 'shift_change' },
+      { key: '/urgent-shift', icon: <ThunderboltOutlined />, label: '紧急班次', moduleCode: 'urgent_shift' },
     ],
   },
   { key: '/report', icon: <BarChartOutlined />, label: '统计报表', moduleCode: 'report' },
   { key: '/announcement', icon: <NotificationOutlined />, label: '公告管理', moduleCode: 'announcement' },
+  { key: '/account-permission', icon: <LockOutlined />, label: '账号权限', adminOnly: true },
 ];
 
 function filterMenuItems(items: any[], isAdmin: boolean, hasModuleAccess: (moduleCode: string) => boolean): any[] {
   return items.flatMap((item) => {
+    // adminOnly 项仅超级管理员可见
+    if (item.adminOnly && !isAdmin) return [];
+
     if (item.children) {
       const children = filterMenuItems(item.children, isAdmin, hasModuleAccess);
-      if (children.length === 0) {
-        return [];
-      }
-
-      const { moduleCode: _moduleCode, ...rest } = item;
+      if (children.length === 0) return [];
+      const { moduleCode: _moduleCode, adminOnly: _adminOnly, ...rest } = item;
       return [{ ...rest, children }];
+    }
+
+    if (item.adminOnly) {
+      const { adminOnly: _, ...rest } = item;
+      return [rest];
     }
 
     if (!item.moduleCode || isAdmin || hasModuleAccess(item.moduleCode)) {
@@ -96,6 +106,37 @@ export function MainLayout() {
   const { token: { colorBgContainer, borderRadiusLG } } = theme.useToken();
 
   const selectedKey = '/' + (location.pathname.split('/')[1] || '');
+
+  // Dynamically compute which menu groups should be open based on current route
+  const openKeys = useMemo(() => {
+    for (const item of menuItems) {
+      if ('children' in item && item.children) {
+        if (item.children.some((c: any) => c.key === selectedKey)) {
+          return [item.key];
+        }
+      }
+    }
+    return [];
+  }, [selectedKey]);
+
+  // Build breadcrumb items from menu structure
+  const breadcrumbItems = useMemo(() => {
+    const items: { title: React.ReactNode }[] = [{ title: <HomeOutlined /> }];
+    for (const item of menuItems) {
+      if ('children' in item && item.children) {
+        const child = item.children.find((c: any) => c.key === selectedKey);
+        if (child) {
+          items.push({ title: item.label });
+          items.push({ title: child.label });
+          return items;
+        }
+      } else if (item.key === selectedKey) {
+        items.push({ title: item.label });
+        return items;
+      }
+    }
+    return items;
+  }, [selectedKey]);
 
   const filteredMenuItems = useMemo(
     () => filterMenuItems(menuItems as any[], isAdmin, hasModuleAccess),
@@ -119,7 +160,7 @@ export function MainLayout() {
         <Menu
           mode="inline"
           selectedKeys={[selectedKey]}
-          defaultOpenKeys={['base', 'project', 'org', 'schedule']}
+          defaultOpenKeys={openKeys}
           items={filteredMenuItems}
           onClick={({ key }) => navigate(key)}
           style={{ border: 'none' }}
@@ -151,8 +192,11 @@ export function MainLayout() {
             </div>
           </Dropdown>
         </Header>
-        <Content style={{ margin: 16, padding: 24, background: colorBgContainer, borderRadius: borderRadiusLG, overflow: 'auto' }}>
-          <Outlet />
+        <Content style={{ margin: 16, display: 'flex', flexDirection: 'column', overflow: 'auto' }}>
+          <Breadcrumb items={breadcrumbItems} style={{ marginBottom: 12 }} />
+          <div style={{ flex: 1, padding: 24, background: colorBgContainer, borderRadius: borderRadiusLG, overflow: 'auto' }}>
+            <Outlet />
+          </div>
         </Content>
       </AntLayout>
     </AntLayout>

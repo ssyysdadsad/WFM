@@ -50,7 +50,7 @@ export async function exportScheduleExcel(params: {
     console.warn('excel-export function 不可用，回退到前端导出逻辑:', error);
   }
 
-  const [scheduleRes, employeeRes, departmentRes, dictRes] = await Promise.all([
+  const [scheduleRes, employeeRes, departmentRes, dictRes, projectRes] = await Promise.all([
     supabase
       .from('schedule')
       .select('*')
@@ -58,19 +58,22 @@ export async function exportScheduleExcel(params: {
       .order('schedule_date'),
     supabase.from('employee').select('id, employee_no, full_name, department_id'),
     supabase.from('department').select('id, department_name'),
-    supabase.from('dict_item').select('id, item_code'),
+    supabase.from('dict_item').select('id, item_code, item_name'),
+    supabase.from('project').select('id, project_name').eq('id', params.projectId).limit(1),
   ]);
 
-  if (scheduleRes.error || employeeRes.error || departmentRes.error || dictRes.error) {
+  if (scheduleRes.error || employeeRes.error || departmentRes.error || dictRes.error || projectRes.error) {
     throw toAppError(
-      scheduleRes.error || employeeRes.error || departmentRes.error || dictRes.error,
+      scheduleRes.error || employeeRes.error || departmentRes.error || dictRes.error || projectRes.error,
       '导出 Excel 失败',
     );
   }
 
+  const projectName = (projectRes.data as any)?.[0]?.project_name || '项目';
+
   const employeeMap = new Map((employeeRes.data || []).map((row: any) => [row.id, row]));
   const departmentMap = new Map((departmentRes.data || []).map((row: any) => [row.id, row.department_name]));
-  const codeMap = new Map((dictRes.data || []).map((row: any) => [row.id, row.item_code]));
+  const codeMap = new Map((dictRes.data || []).map((row: any) => [row.id, row.item_name]));
 
   const rowMap = new Map<
     string,
@@ -101,6 +104,7 @@ export async function exportScheduleExcel(params: {
 
   const workbook = buildScheduleWorkbook({
     scheduleMonth: params.scheduleMonth,
+    projectName,
     rows: Array.from(rowMap.values()),
   });
 

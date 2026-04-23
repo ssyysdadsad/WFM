@@ -113,3 +113,10 @@ export async function saveAnnouncement(
     throw toAppError(error, '保存公告失败');
   }
 }
+
+export async function deleteAnnouncement(id: string) {
+  const { error } = await supabase.from('announcement').delete().eq('id', id);
+  if (error) {
+    throw toAppError(error, '删除公告失败');
+  }
+}

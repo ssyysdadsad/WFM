@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router';
 import dayjs, { type Dayjs } from 'dayjs';
 import { getErrorMessage } from '@/app/lib/supabase/errors';
 import {
@@ -16,6 +17,10 @@ import type {
 } from '@/app/types/schedule';
 
 export function useScheduleMatrix() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlProjectId = searchParams.get('projectId') || undefined;
+  const urlVersionId = searchParams.get('versionId') || undefined;
+
   const [projects, setProjects] = useState<ScheduleProjectOption[]>([]);
   const [versions, setVersions] = useState<ScheduleVersionOption[]>([]);
   const [departments, setDepartments] = useState<ScheduleDepartmentOption[]>([]);
@@ -29,6 +34,10 @@ export function useScheduleMatrix() {
   const [loading, setLoading] = useState(false);
   const [dataLoaded, setDataLoaded] = useState(false);
   const [error, setError] = useState<string>();
+  // Track whether URL params have been consumed
+  const [urlConsumed, setUrlConsumed] = useState(false);
+  // Track explicit user version selection to prevent auto-override
+  const explicitVersionRef = useRef<string | null>(null);
 
   const refreshReferences = useCallback(async () => {
     try {
@@ -37,6 +46,14 @@ export function useScheduleMatrix() {
       setDepartments(refs.departments);
       setAllEmployees(refs.employees);
       setCodeItems(refs.codeItems);
+      // Auto-select project from URL or first available
+      if (refs.projects.length > 0) {
+        setSelectedProject(prev => {
+          if (prev) return prev;
+          if (urlProjectId && refs.projects.some(p => p.id === urlProjectId)) return urlProjectId;
+          return refs.projects[0].id;
+        });
+      }
     } catch (loadError) {
       setError(getErrorMessage(loadError, '加载排班矩阵基础数据失败'));
     }
@@ -87,9 +104,39 @@ export function useScheduleMatrix() {
 
     refreshVersions(selectedProject)
       .then((rows) => {
-        const monthStr = selectedMonth.format('YYYY-MM');
-        const matchedVersion = rows.find((item) => item.scheduleMonth?.startsWith(monthStr));
-        setSelectedVersion(matchedVersion?.id ?? rows[0]?.id);
+        // If URL has a specific versionId, use it and sync its month
+        if (!urlConsumed && urlVersionId && rows.some(r => r.id === urlVersionId)) {
+          setSelectedVersion(urlVersionId);
+          // Lock this version via explicitRef so the upcoming month-change effect won't override it
+          explicitVersionRef.current = urlVersionId;
+          // Sync month from the matched version
+          const matchedVersion = rows.find(r => r.id === urlVersionId);
+          if (matchedVersion?.scheduleMonth) {
+            const monthValue = dayjs(matchedVersion.scheduleMonth);
+            if (monthValue.isValid()) {
+              setSelectedMonth(monthValue);
+            }
+          }
+          // Mark URL params as consumed and clean URL
+          setUrlConsumed(true);
+          setSearchParams({}, { replace: true });
+        } else if (explicitVersionRef.current) {
+          // User explicitly selected a version (or URL just consumed) - use it and clear the flag
+          const explicitId = explicitVersionRef.current;
+          explicitVersionRef.current = null;
+          if (rows.some(r => r.id === explicitId)) {
+            setSelectedVersion(explicitId);
+          } else {
+            const monthStr = selectedMonth.format('YYYY-MM');
+            const matchedVersion = rows.find((item) => item.scheduleMonth?.startsWith(monthStr));
+            setSelectedVersion(matchedVersion?.id ?? rows[0]?.id);
+          }
+        } else {
+          // Normal selection: match current month or pick first
+          const monthStr = selectedMonth.format('YYYY-MM');
+          const matchedVersion = rows.find((item) => item.scheduleMonth?.startsWith(monthStr));
+          setSelectedVersion(matchedVersion?.id ?? rows[0]?.id);
+        }
       })
       .catch((loadError) => {
         setError(getErrorMessage(loadError, '加载排班版本失败'));
@@ -102,16 +149,18 @@ export function useScheduleMatrix() {
 
   const handleVersionChange = useCallback(
     (versionId: string) => {
+      // Set the explicit ref BEFORE changing month to prevent the effect from overriding
+      explicitVersionRef.current = versionId;
       setSelectedVersion(versionId);
       const matchedVersion = versions.find((item) => item.id === versionId);
       if (matchedVersion?.scheduleMonth) {
         const monthValue = dayjs(matchedVersion.scheduleMonth);
-        if (monthValue.isValid()) {
+        if (monthValue.isValid() && !monthValue.isSame(selectedMonth, 'month')) {
           setSelectedMonth(monthValue);
         }
       }
     },
-    [versions],
+    [versions, selectedMonth],
   );
 
   return {

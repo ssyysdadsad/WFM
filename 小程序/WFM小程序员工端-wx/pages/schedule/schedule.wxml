@@ -1,0 +1,213 @@
+<wxs module="util">
+module.exports.firstChar = function(str, fallback) {
+  var s = str || fallback || '用'
+  return s.charAt(0)
+}
+</wxs>
+
+<view class="schedule-page">
+  <!-- Header -->
+  <view class="page-header">
+    <text class="page-title">排班查看</text>
+    <view class="export-btn" bindtap="exportImage">
+      <text class="export-icon">⇩</text>
+      <text class="export-text">导出图片</text>
+    </view>
+  </view>
+
+  <!-- Employee card -->
+  <view class="emp-card">
+    <view class="emp-avatar">{{util.firstChar(employee.name, '用')}}</view>
+    <view class="emp-info">
+      <text class="emp-name">{{employee.name || '员工'}} · {{employee.no || ''}}</text>
+      <text class="emp-dept">{{employee.department || ''}}</text>
+    </view>
+  </view>
+
+  <!-- Stats row -->
+  <view class="stats-row">
+    <view class="stat-card stat-blue">
+      <view class="stat-icon stat-icon-blue">⏱</view>
+      <view class="stat-body">
+        <text class="stat-label">应完成工时</text>
+        <text class="stat-value">{{totalPlannedHours || 0}}<text class="stat-unit">h</text></text>
+      </view>
+    </view>
+    <view class="stat-card stat-green">
+      <view class="stat-icon stat-icon-green">✓</view>
+      <view class="stat-body">
+        <text class="stat-label">已完成工时</text>
+        <text class="stat-value">{{totalActualHours || 0}}<text class="stat-unit">h</text></text>
+      </view>
+    </view>
+  </view>
+
+  <!-- View mode tabs -->
+  <view class="view-tabs">
+    <view class="view-tab {{viewMode === 'month' ? 'active' : ''}}" bindtap="switchView" data-mode="month">月视图</view>
+    <view class="view-tab {{viewMode === 'week' ? 'active' : ''}}" bindtap="switchView" data-mode="week">周视图</view>
+    <view class="view-tab {{viewMode === 'day' ? 'active' : ''}}" bindtap="switchView" data-mode="day">日视图</view>
+  </view>
+
+  <!-- ========== MONTH VIEW ========== -->
+  <block wx:if="{{viewMode === 'month'}}">
+    <!-- Search bar -->
+    <view class="search-section">
+      <view class="filter-tag active">全部</view>
+      <view class="search-bar">
+        <text class="search-icon">🔍</text>
+        <input class="search-input" placeholder="按日期搜索 (如: 11)..." value="{{searchValue}}" bindinput="onSearchInput" />
+      </view>
+    </view>
+
+    <!-- Month selector -->
+    <view class="month-bar">
+      <view class="month-nav" bindtap="prevMonth">
+        <text class="nav-arrow">‹</text>
+      </view>
+      <text class="month-title">{{year}}年{{month}}月</text>
+      <view class="month-nav" bindtap="nextMonth">
+        <text class="nav-arrow">›</text>
+      </view>
+    </view>
+
+    <!-- Calendar -->
+    <view class="calendar-wrap">
+      <view class="weekday-row">
+        <text wx:for="{{weekdays}}" wx:key="*this" class="weekday-cell">{{item}}</text>
+      </view>
+      <view class="calendar-grid">
+        <view wx:for="{{calendarDays}}" wx:key="index"
+          class="day-cell {{item.isToday ? 'today' : ''}} {{item.day === selectedDay ? 'selected' : ''}} {{!item.day ? 'empty' : ''}}"
+          bindtap="selectDay" data-day="{{item.day}}">
+          <text class="day-num">{{item.day || ''}}</text>
+          <text wx:if="{{item.code}}" class="day-code" style="color:{{item.style.text}};">{{item.code}}</text>
+          <view wx:if="{{item.isToday}}" class="today-dot"></view>
+        </view>
+      </view>
+    </view>
+  </block>
+
+  <!-- ========== WEEK VIEW ========== -->
+  <block wx:elif="{{viewMode === 'week'}}">
+    <view class="week-nav-bar">
+      <view class="month-nav" bindtap="prevWeek">
+        <text class="nav-arrow">‹</text>
+      </view>
+      <text class="month-title">{{weekLabel}}</text>
+      <view class="month-nav" bindtap="nextWeek">
+        <text class="nav-arrow">›</text>
+      </view>
+    </view>
+
+    <view class="week-row">
+      <view wx:for="{{weekDays}}" wx:key="index"
+        class="week-day-cell {{item.isToday ? 'today' : ''}} {{item.day === selectedDay && item.month === month ? 'selected' : ''}}"
+        bindtap="selectWeekDay" data-day="{{item.day}}" data-month="{{item.month}}" data-year="{{item.year}}">
+        <text class="week-day-label">{{item.weekdayLabel}}</text>
+        <text class="week-day-num">{{item.day}}</text>
+        <text wx:if="{{item.code}}" class="week-day-code" style="color:{{item.style.text}};background:{{item.style.bg}};">{{item.code}}</text>
+        <text wx:else class="week-day-code rest-code">休</text>
+      </view>
+    </view>
+
+    <!-- Week detail list -->
+    <view class="week-detail-list">
+      <view wx:for="{{weekDays}}" wx:key="index" class="week-detail-item" bindtap="selectWeekDay"
+        data-day="{{item.day}}" data-month="{{item.month}}" data-year="{{item.year}}">
+        <view class="week-detail-date">
+          <text class="week-detail-d">{{item.month}}/{{item.day}}</text>
+          <text class="week-detail-w">{{item.weekdayLabel}}</text>
+        </view>
+        <view wx:if="{{item.code && item.code !== '休'}}" class="week-detail-shift">
+          <view class="week-detail-icon" style="background:{{item.style.bg}};color:{{item.style.text}};">{{item.code}}</view>
+          <view class="week-detail-info">
+            <text class="week-detail-name">{{item.style.label || item.code}}</text>
+            <text wx:if="{{item.style.time}}" class="week-detail-time">{{item.style.time}}</text>
+          </view>
+          <text class="week-detail-hours">{{item.hours || 0}}h</text>
+        </view>
+        <view wx:else class="week-detail-shift rest-shift">
+          <text class="week-rest-text">休息</text>
+        </view>
+      </view>
+    </view>
+  </block>
+
+  <!-- ========== DAY VIEW ========== -->
+  <block wx:elif="{{viewMode === 'day'}}">
+    <view class="day-nav-bar">
+      <view class="month-nav" bindtap="prevDay">
+        <text class="nav-arrow">‹</text>
+      </view>
+      <text class="month-title">{{month}}月{{selectedDay}}日 周{{selectedWeekday}}</text>
+      <view class="month-nav" bindtap="nextDay">
+        <text class="nav-arrow">›</text>
+      </view>
+    </view>
+
+    <view class="day-detail-wrap">
+      <view wx:if="{{selectedDetail}}" class="day-detail-card">
+        <view class="day-detail-badge" style="background:{{selectedDetail.style.bg}};color:{{selectedDetail.style.text}};">
+          {{selectedDetail.code}}
+        </view>
+        <view class="day-detail-main">
+          <text class="day-detail-title">{{selectedDetail.style.label || selectedDetail.code}}</text>
+          <text wx:if="{{selectedDetail.time}}" class="day-detail-time">🕐 {{selectedDetail.time}}</text>
+          <view class="day-detail-meta">
+            <text class="day-detail-hours-label">工时</text>
+            <text class="day-detail-hours-value">{{selectedDetail.hours || 0}} 小时</text>
+          </view>
+        </view>
+      </view>
+      <view wx:else class="day-detail-card day-rest-card">
+        <view class="day-rest-emoji">☕</view>
+        <text class="day-rest-title">休息日</text>
+        <text class="day-rest-sub">今天不用上班，好好休息~</text>
+      </view>
+    </view>
+  </block>
+
+  <!-- Selected day detail (only in month view) -->
+  <view wx:if="{{viewMode === 'month' && selectedDay}}" class="detail-section">
+    <view class="detail-date-header">
+      <text class="detail-date-text">{{month}}月{{selectedDay}}日 周{{selectedWeekday}}</text>
+    </view>
+    <view wx:if="{{selectedDetail}}" class="detail-card">
+      <view class="detail-top">
+        <view class="detail-shift-icon" style="background:{{selectedDetail.style.bg}};color:{{selectedDetail.style.text}};">
+          {{selectedDetail.code}}
+        </view>
+        <view class="detail-info">
+          <text class="detail-shift-name">{{selectedDetail.style.label || selectedDetail.code}}</text>
+          <text wx:if="{{selectedDetail.time}}" class="detail-shift-time">🕐 {{selectedDetail.time}}</text>
+        </view>
+        <view class="detail-hours">{{selectedDetail.hours || 0}}h</view>
+      </view>
+    </view>
+    <view wx:elif="{{selectedDay}}" class="detail-card rest-card">
+      <view class="rest-content">
+        <text class="rest-label">休息日</text>
+        <text class="rest-sub">今天不用上班，好好休息~</text>
+      </view>
+    </view>
+  </view>
+
+  <!-- Legend -->
+  <view class="legend-section">
+    <view class="section-header-row">
+      <view class="bar bar-blue"></view>
+      <text class="legend-title">班次图例</text>
+    </view>
+    <view class="legend-list">
+      <view wx:for="{{legendItems}}" wx:key="code" class="legend-chip" style="background:{{item.bg}};color:{{item.text}};border:1rpx solid {{item.text}}20;">
+        <text class="legend-chip-code">{{item.code}}</text>
+        <text class="legend-chip-name">{{item.label}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view wx:if="{{loading}}" class="loading-overlay">
+    <view class="loading-spinner"></view>
+  </view>
+</view>

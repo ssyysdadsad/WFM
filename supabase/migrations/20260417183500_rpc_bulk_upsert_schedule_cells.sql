@@ -1,6 +1,6 @@
 create or replace function public.bulk_upsert_schedule_cells(
-  schedule_version_id uuid,
-  changes jsonb
+  p_schedule_version_id uuid,
+  p_changes jsonb
 )
 returns jsonb
 language plpgsql
@@ -10,7 +10,7 @@ as $$
 declare
   change_item jsonb;
 begin
-  for change_item in select * from jsonb_array_elements(changes)
+  for change_item in select * from jsonb_array_elements(p_changes)
   loop
     insert into public.schedule (
       schedule_version_id,
@@ -27,7 +27,7 @@ begin
       remark
     )
     values (
-      bulk_upsert_schedule_cells.schedule_version_id,
+      p_schedule_version_id,
       (change_item ->> 'employeeId')::uuid,
       nullif(change_item ->> 'departmentId', '')::uuid,
       (change_item ->> 'projectId')::uuid,

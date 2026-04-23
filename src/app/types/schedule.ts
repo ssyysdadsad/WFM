@@ -4,6 +4,8 @@ export type ScheduleProjectOption = {
   id: string;
   projectName: string;
   projectCode?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
 };
 
 export type ScheduleVersionOption = {

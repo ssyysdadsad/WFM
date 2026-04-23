@@ -31,6 +31,10 @@ export type ScheduleImportResult = {
   failedRows: number;
   errors: ScheduleImportError[];
   message?: string;
+  laborRuleWarnings?: {
+    hardViolations: { message: string; ruleName: string }[];
+    softViolations: { message: string; ruleName: string }[];
+  };
 };
 
 export type ScheduleExportResult = {

@@ -1,0 +1,11 @@
+.ann-page { min-height: 100vh; }
+.filter-bar { background: #fff; padding: 24rpx 40rpx 16rpx; border-bottom: 1rpx solid #DDE9FF; }
+.header-title { font-size: 32rpx; font-weight: 600; color: #1A2E4A; display: block; margin-bottom: 20rpx; }
+.type-scroll { white-space: nowrap; padding-bottom: 8rpx; }
+.type-btn { display: inline-block; padding: 8rpx 24rpx; border-radius: 32rpx; font-size: 24rpx; color: #A3B5C8; background: #F6F8FA; border: 1rpx solid #DDE9FF; margin-right: 12rpx; }
+.type-btn.active { color: #fff; background: linear-gradient(90deg, #2895FF, #62D9FF); border-color: transparent; font-weight: 600; }
+.empty-state { display: flex; flex-direction: column; align-items: center; padding: 120rpx 0; }
+.ann-card { padding: 24rpx 32rpx; }
+.ann-icon { width: 72rpx; height: 72rpx; border-radius: 16rpx; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.ann-title { font-size: 26rpx; font-weight: 500; color: #1A2E4A; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.ann-content { font-size: 22rpx; color: #A3B5C8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }

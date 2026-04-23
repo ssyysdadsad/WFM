@@ -13,6 +13,7 @@ export type EmployeeRecord = {
   channelId: string;
   onboardDate?: string | null;
   employeeStatusDictItemId?: string | null;
+  laborRelationDictItemId?: string | null;
   remark?: string | null;
 };
 
@@ -24,6 +25,7 @@ export type EmployeeFormValues = {
   channelId: string;
   onboardDate?: string | null;
   employeeStatusDictItemId?: string | null;
+  laborRelationDictItemId?: string | null;
   remark?: string | null;
 };
 

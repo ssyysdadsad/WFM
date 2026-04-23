@@ -33,14 +33,14 @@ function mapScheduleRow(row: any): ScheduleCellRecord {
   };
 }
 
+// With shift_type merged into schedule_code, this just returns the codeItem's own id
 export function resolveShiftTypeDictItemId(codeItem?: ScheduleCodeItem | null) {
-  const extra = codeItem?.extraConfig || {};
-  return extra.shift_type_dict_item_id || extra.mapped_shift_type_dict_item_id || codeItem?.id || null;
+  return codeItem?.id || null;
 }
 
 export async function loadScheduleMatrixReferences() {
   const [projectRes, departmentRes, employeeRes, dictTypeRes] = await Promise.all([
-    supabase.from('project').select('id, project_name, project_code').order('project_name'),
+    supabase.from('project').select('id, project_name, project_code, start_date, end_date').order('project_name'),
     supabase.from('department').select('id, department_name').order('department_name'),
     supabase.from('employee').select('id, full_name, employee_no, department_id').order('full_name'),
     supabase.from('dict_type').select('id, type_code').order('sort_order'),
@@ -75,6 +75,8 @@ export async function loadScheduleMatrixReferences() {
         id: row.id,
         projectName: row.project_name,
         projectCode: row.project_code,
+        startDate: row.start_date,
+        endDate: row.end_date,
       }),
     ),
     departments: (departmentRes.data || []).map(
@@ -240,9 +242,9 @@ export async function bulkUpsertScheduleCells(params: {
   changes: ScheduleCellChange[];
 }) {
   const rpcRes = await supabase.rpc('bulk_upsert_schedule_cells', {
-    schedule_version_id: params.scheduleVersionId,
-    changes: params.changes,
-  });
+    p_schedule_version_id: params.scheduleVersionId,
+    p_changes: params.changes,
+  } as any);
 
   if (!rpcRes.error) {
     return rpcRes.data;
@@ -251,6 +253,8 @@ export async function bulkUpsertScheduleCells(params: {
   if (!isMissingRpcError(rpcRes.error)) {
     throw toAppError(rpcRes.error, '保存排班失败');
   }
+
+  const results: Array<{ employeeId: string; scheduleDate: string; id: string }> = [];
 
   for (const change of params.changes) {
     const { data: existingRows, error: existingError } = await supabase
@@ -285,15 +289,17 @@ export async function bulkUpsertScheduleCells(params: {
       if (error) {
         throw toAppError(error, '保存排班失败');
       }
+      results.push({ employeeId: change.employeeId, scheduleDate: change.scheduleDate, id: existingRows[0].id });
     } else {
-      const { error } = await supabase.from('schedule').insert(record);
+      const { data, error } = await supabase.from('schedule').insert(record).select('id').single();
       if (error) {
         throw toAppError(error, '保存排班失败');
       }
+      results.push({ employeeId: change.employeeId, scheduleDate: change.scheduleDate, id: data.id });
     }
   }
 
-  return { success: true };
+  return results;
 }
 
 export async function deleteScheduleRecordsByIds(ids: string[]) {

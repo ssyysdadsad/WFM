@@ -24,7 +24,7 @@ export function TaskPage() {
         loadForeignData: loadCrudForeignOptions,
       }}
       columns={[
-        { key: 'task_code', title: '任务编码' },
+        { key: 'task_code', title: '任务编码', autoCode: 'TASK', hideInTable: true },
         { key: 'task_name', title: '任务名称', required: true },
         { key: 'project_id', title: '所属项目', required: true, foreignTable: 'project', foreignLabel: 'project_name' },
         { key: 'target_total_hours', title: '目标工时', type: 'number' },
@@ -32,7 +32,7 @@ export function TaskPage() {
         { key: 'target_efficiency_rate', title: '效率要求', type: 'number', hideInTable: true },
         { key: 'planned_start_date', title: '开始日期', type: 'date' },
         { key: 'planned_end_date', title: '结束日期', type: 'date' },
-        { key: 'task_status_dict_item_id', title: '状态', foreignTable: 'dict_item', foreignLabel: 'item_name' },
+        { key: 'task_status_dict_item_id', title: '状态', foreignTable: 'dict_item', foreignLabel: 'item_name', dictType: 'task_status', filterable: true },
         { key: 'remark', title: '备注', type: 'textarea', hideInTable: true },
       ]}
     />

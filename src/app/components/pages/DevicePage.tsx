@@ -24,11 +24,11 @@ export function DevicePage() {
         loadForeignData: loadCrudForeignOptions,
       }}
       columns={[
-        { key: 'device_code', title: '设备编号', required: true },
+        { key: 'device_code', title: '设备编号', autoCode: 'DEV', hideInTable: true },
         { key: 'device_name', title: '设备名称', required: true },
         { key: 'scene_id', title: '所属场景', required: true, foreignTable: 'scene', foreignLabel: 'scene_name' },
         { key: 'skill_id', title: '绑定技能', required: true, foreignTable: 'skill', foreignLabel: 'skill_name' },
-        { key: 'device_status_dict_item_id', title: '状态', foreignTable: 'dict_item', foreignLabel: 'item_name' },
+        { key: 'device_status_dict_item_id', title: '状态', foreignTable: 'dict_item', foreignLabel: 'item_name', dictType: 'device_status' },
         { key: 'remark', title: '备注', type: 'textarea', hideInTable: true },
       ]}
     />

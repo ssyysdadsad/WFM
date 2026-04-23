@@ -1,0 +1,72 @@
+<!-- pages/login/login.wxml -->
+<view class="login-page">
+  <!-- Hero header -->
+  <view class="hero header-gradient">
+    <view class="deco-circle-1"></view>
+    <view class="deco-circle-2"></view>
+    <view class="hero-content">
+      <view class="logo-box">
+        <image src="/assets/logo.png" mode="aspectFit" class="logo-icon" />
+      </view>
+      <text class="hero-title">WFM 排班系统</text>
+      <text class="hero-sub">员工端</text>
+    </view>
+  </view>
+
+  <!-- Login card -->
+  <view class="login-card">
+    <text class="card-title">欢迎登录</text>
+    <text class="card-sub">请输入您的手机号和密码</text>
+
+    <!-- Success message -->
+    <view wx:if="{{successMsg}}" class="alert-success">
+      <text>✓ {{successMsg}}</text>
+    </view>
+
+    <!-- Error message -->
+    <view wx:if="{{error}}" class="alert-error">
+      <text>{{error}}</text>
+    </view>
+
+    <!-- Phone input -->
+    <view class="input-group {{phoneFocus ? 'focus' : ''}}">
+      <image src="/assets/icon-phone.png" class="icon" mode="aspectFit" />
+      <input 
+        type="number" 
+        maxlength="11" 
+        placeholder="手机号" 
+        placeholder-class="placeholder"
+        value="{{phone}}"
+        bindinput="onPhoneInput"
+        bindfocus="onPhoneFocus"
+        bindblur="onPhoneBlur"
+      />
+    </view>
+
+    <!-- Password input -->
+    <view class="input-group {{pwdFocus ? 'focus' : ''}}">
+      <image src="/assets/icon-lock.png" class="icon" mode="aspectFit" />
+      <input 
+        password="{{!showPwd}}"
+        placeholder="密码"
+        placeholder-class="placeholder"
+        value="{{password}}"
+        bindinput="onPwdInput"
+        bindfocus="onPwdFocus"
+        bindblur="onPwdBlur"
+        bindconfirm="handleLogin"
+      />
+      <view class="eye-btn" bindtap="togglePwd">
+        <image src="{{showPwd ? '/assets/icon-eye.png' : '/assets/icon-eye-off.png'}}" class="icon" mode="aspectFit" />
+      </view>
+    </view>
+
+    <!-- Login button -->
+    <button class="btn-primary" bindtap="handleLogin" disabled="{{loading}}">
+      <text wx:if="{{loading}}">登录中...</text>
+      <text wx:else>登 录</text>
+    </button>
+
+    <text class="hint-text">首次登录请使用管理员分配的初始密码</text>
+  </view>
+</view>
