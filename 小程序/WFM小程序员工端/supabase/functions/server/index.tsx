@@ -464,6 +464,15 @@ app.post("/make-server-9f9c6649/shift-changes", async (c) => {
       return c.json({ success: false, message: "请填写完整信息" }, 400);
     }
 
+    // 校验：原班次如果已经是休息，则不允许申请调班
+    const shiftTypes = await kv.get("config::shift_types") as Record<string, any> | null;
+    if (shiftTypes && originalShift) {
+      const st = shiftTypes[originalShift];
+      if (st && (st.category === 'rest' || st.category === 'leave')) {
+        return c.json({ success: false, message: `您在 ${originalDate} 的班次为「${originalShift}」（休息），无需申请调班` }, 400);
+      }
+    }
+
     // Look up target employee name if swap
     let targetEmployeeName = null;
     if (type === "swap" && targetEmployeeId) {

@@ -72,9 +72,10 @@ module.exports.firstChar = function(str, fallback) {
         </view>
         <view class="form-col">
           <text class="field-label">我的班次</text>
-          <view class="input-box">
-            <text class="input-value">{{myShiftCode || '自动获取'}}</text>
+          <view class="input-box {{myShiftIsRest ? 'input-error' : ''}}">
+            <text class="input-value" style="{{myShiftIsRest ? 'color:#D96B5A;' : ''}}">{{myShiftCode || '自动获取'}}</text>
           </view>
+          <text wx:if="{{myShiftIsRest}}" class="field-error">已是休息日，无需调班</text>
         </view>
       </view>
 
@@ -108,9 +109,10 @@ module.exports.firstChar = function(str, fallback) {
         </view>
         <view class="form-col">
           <text class="field-label">我的班次</text>
-          <view class="input-box">
-            <text class="input-value">{{myShiftCode || '自动获取'}}</text>
+          <view class="input-box {{myShiftIsRest ? 'input-error' : ''}}">
+            <text class="input-value" style="{{myShiftIsRest ? 'color:#D96B5A;' : ''}}">{{myShiftCode || '自动获取'}}</text>
           </view>
+          <text wx:if="{{myShiftIsRest}}" class="field-error">已是休息日，无需调班</text>
         </view>
       </view>
 
@@ -153,8 +155,8 @@ module.exports.firstChar = function(str, fallback) {
     </view>
 
     <!-- Submit -->
-    <button class="submit-btn" bindtap="handleSubmit" disabled="{{submitting}}">
-      <text>{{submitting ? '提交中...' : '提交申请'}}</text>
+    <button class="submit-btn {{myShiftIsRest ? 'btn-disabled' : ''}}" bindtap="handleSubmit" disabled="{{submitting || myShiftIsRest}}">
+      <text>{{submitting ? '提交中...' : (myShiftIsRest ? '当前班次为休息，无法申请' : '提交申请')}}</text>
     </button>
   </view>
 

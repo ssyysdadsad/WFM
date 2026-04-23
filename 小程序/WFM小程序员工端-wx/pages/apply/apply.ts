@@ -18,6 +18,7 @@ Page({
     formTargetShiftLabel: '',
     formTargetShiftId: '',
     targetShiftIsRest: false,
+    myShiftIsRest: false,
     targetScheduleId: '',
     formTargetEmpId: '',
     formTargetEmpName: '',
@@ -80,7 +81,7 @@ Page({
   // ===== Form handlers =====
   async onOrigDateChange(e: any) {
     const date = e.detail.value
-    this.setData({ formOrigDate: date, myShiftCode: '', myScheduleId: '' })
+    this.setData({ formOrigDate: date, myShiftCode: '', myScheduleId: '', myShiftIsRest: false, formError: '' })
     // Auto-detect my shift on this date
     await this.detectMyShift(date)
     // For swap mode, load available employees for this date
@@ -223,13 +224,26 @@ Page({
       )
       if (rows.length > 0) {
         const codeId = rows[0].schedule_code_dict_item_id
-        const codes: any[] = await query('dict_item', `id=eq.${codeId}&select=item_name&limit=1`)
+        const codes: any[] = await query('dict_item', `id=eq.${codeId}&select=item_name,extra_config&limit=1`)
+        const codeItem = codes?.[0]
+        const codeName = codeItem?.item_name || '?'
+        const category = codeItem?.extra_config?.category || 'work'
+        const isRest = category === 'rest' || category === 'leave'
+
         this.setData({
-          myShiftCode: codes?.[0]?.item_name || '?',
+          myShiftCode: codeName,
           myScheduleId: rows[0].id,
+          myShiftIsRest: isRest,
         })
+
+        // 已经是休息的员工不需要申请调班
+        if (isRest) {
+          this.setData({ formError: `您在 ${date} 的班次为「${codeName}」（休息），无需申请调班` })
+        } else {
+          this.setData({ formError: '' })
+        }
       } else {
-        this.setData({ myShiftCode: '无排班', myScheduleId: '' })
+        this.setData({ myShiftCode: '无排班', myScheduleId: '', myShiftIsRest: false })
       }
     } catch (e) { console.error('Detect shift error:', e) }
   },
@@ -371,6 +385,10 @@ Page({
     const { requestType, formOrigDate, formReason, myScheduleId, _pendingStatusId } = this.data
     if (!formOrigDate) { this.setData({ formError: '请选择原排班日期' }); return }
     if (!myScheduleId) { this.setData({ formError: '该日期未找到排班记录' }); return }
+    // 已经是休息状态则不允许申请调班
+    if (this.data.myShiftIsRest) {
+      this.setData({ formError: `您在 ${formOrigDate} 已经是休息状态，无需申请调班` }); return
+    }
     if (!formReason) { this.setData({ formError: '请输入调班事由' }); return }
     if (!_pendingStatusId) { this.setData({ formError: '系统配置异常' }); return }
 

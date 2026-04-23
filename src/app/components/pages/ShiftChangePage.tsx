@@ -213,6 +213,26 @@ export function ShiftChangePage() {
 
   // Quick approve for swap (no replacement needed)
   function handleQuickApproval(record: ShiftChangeRequestRecord, approved: boolean) {
+    // 校验：互换调班时两人班次相同无意义（如"休"换"休"）
+    if (approved && record.requestType === 'swap' && record.originalCodeName && record.targetCodeName
+        && record.originalCodeName === record.targetCodeName) {
+      Modal.warning({
+        title: '互换无意义',
+        content: (
+          <div>
+            <Alert
+              type="warning" showIcon
+              message={`${record.applicantName} 和 ${record.targetEmployeeName} 当天班次均为「${record.originalCodeName}」，互换后无任何变化。`}
+              description="建议拒绝此申请，或要求员工选择不同班次的同事进行互换。"
+              style={{ marginBottom: 12 }}
+            />
+          </div>
+        ),
+        okText: '知道了',
+      });
+      return;
+    }
+
     Modal.confirm({
       title: approved ? '确认通过' : '确认拒绝',
       content: (
@@ -220,7 +240,7 @@ export function ShiftChangePage() {
           <span>{`确定${approved ? '通过' : '拒绝'}此${record.requestType === 'swap' ? '互换调班' : '调班'}申请？`}</span>
           {record.requestType === 'swap' && approved && (
             <div style={{ background: '#f6ffed', padding: 12, borderRadius: 8, border: '1px solid #b7eb8f' }}>
-              <div><strong>{record.applicantName}</strong> 的 {record.originalCodeName} ↔ <strong>{record.targetEmployeeName}</strong> 的班次将互换</div>
+              <div><strong>{record.applicantName}</strong> 的 {record.originalCodeName} ↔ <strong>{record.targetEmployeeName}</strong> 的 {record.targetCodeName || '班次'} 将互换</div>
             </div>
           )}
           <Input.TextArea
@@ -384,15 +404,26 @@ export function ShiftChangePage() {
         pagination={{ pageSize: 10, showSizeChanger: true, showTotal: total => `共 ${total} 条` }}
         columns={[
           {
-            title: '调班类型', dataIndex: 'requestType', width: 100,
-            render: (value: string) => (
-              <Tag
-                icon={value === 'swap' ? <SwapOutlined /> : <UserSwitchOutlined />}
-                color={value === 'swap' ? 'blue' : 'orange'}
-              >
-                {value === 'swap' ? '互换调班' : '直接变更'}
-              </Tag>
-            ),
+            title: '调班类型', dataIndex: 'requestType', width: 120,
+            render: (value: string, record: ShiftChangeRequestRecord) => {
+              const isSameShift = value === 'swap' && record.originalCodeName && record.targetCodeName
+                && record.originalCodeName === record.targetCodeName;
+              return (
+                <Space size={4}>
+                  <Tag
+                    icon={value === 'swap' ? <SwapOutlined /> : <UserSwitchOutlined />}
+                    color={value === 'swap' ? 'blue' : 'orange'}
+                  >
+                    {value === 'swap' ? '互换调班' : '直接变更'}
+                  </Tag>
+                  {isSameShift && (
+                    <Tooltip title={`两人班次均为「${record.originalCodeName}」，互换无意义`}>
+                      <WarningOutlined style={{ color: '#ff4d4f', fontSize: 14 }} />
+                    </Tooltip>
+                  )}
+                </Space>
+              );
+            },
           },
           {
             title: '申请人', width: 120,
@@ -594,6 +625,16 @@ export function ShiftChangePage() {
                     <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>{detailRecord.targetDate || '-'}</div>
                   </div>
                 </div>
+                {/* 相同班次互换警告 */}
+                {detailRecord.originalCodeName && detailRecord.targetCodeName
+                  && detailRecord.originalCodeName === detailRecord.targetCodeName && (
+                  <Alert
+                    type="error" showIcon
+                    message="互换无意义"
+                    description={`两人班次均为「${detailRecord.originalCodeName}」，互换后排班无任何变化，建议拒绝此申请。`}
+                    style={{ marginTop: 8 }}
+                  />
+                )}
               </Card>
             )}
 

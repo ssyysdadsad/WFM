@@ -151,6 +151,10 @@
 .submit-btn[disabled] {
   opacity: 0.5;
 }
+.submit-btn.btn-disabled {
+  background: #C0CCDA;
+  box-shadow: none;
+}
 
 /* Alerts */
 .alert-success {

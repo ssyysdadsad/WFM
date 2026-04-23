@@ -58,6 +58,7 @@ export async function listShiftChangeRequests() {
       target_employee:target_employee_id(full_name),
       original_schedule:original_schedule_id(schedule_date, planned_hours, schedule_version_id, schedule_code_dict_item_id, project_id, schedule_code:schedule_code_dict_item_id(item_name), project:project_id(project_name, start_date, end_date)),
       target_code:target_schedule_code_dict_item_id(item_name),
+      original_code_snapshot:original_schedule_code_dict_item_id(item_name),
       status:approval_status_dict_item_id(item_name, item_code)
     `)
     .order('created_at', { ascending: false });
@@ -84,15 +85,17 @@ export async function listShiftChangeRequests() {
     approvedAt: row.approved_at,
     approvalComment: row.approval_comment,
     createdAt: row.created_at,
-    // Display fields
+    // Display fields - 优先使用快照字段（申请时冻结），兜底用实时 schedule 数据
     applicantName: row.applicant?.full_name || '-',
     applicantDeptName: row.applicant?.department?.department_name || '-',
     applicantDepartmentId: row.applicant?.department_id || null,
     applicantLaborRelationDictItemId: row.applicant?.labor_relation_dict_item_id || null,
     targetEmployeeName: row.target_employee?.full_name || null,
-    originalScheduleDate: row.original_schedule?.schedule_date || null,
-    originalCodeName: row.original_schedule?.schedule_code?.item_name || null,
-    originalPlannedHours: row.original_schedule?.planned_hours != null ? Number(row.original_schedule.planned_hours) : null,
+    originalScheduleDate: row.original_schedule_date || row.original_schedule?.schedule_date || null,
+    originalCodeName: row.original_code_snapshot?.item_name || row.original_schedule?.schedule_code?.item_name || null,
+    originalPlannedHours: row.original_planned_hours != null
+      ? Number(row.original_planned_hours)
+      : (row.original_schedule?.planned_hours != null ? Number(row.original_schedule.planned_hours) : null),
     targetCodeName: row.target_code?.item_name || null,
     projectName: row.original_schedule?.project?.project_name || '-',
     projectStartDate: row.original_schedule?.project?.start_date || null,
@@ -345,6 +348,23 @@ export async function approveShiftChange(payload: ShiftChangeApprovePayload) {
       const original = schedules.find((item: any) => item.id === request.original_schedule_id);
       const target = schedules.find((item: any) => item.id === request.target_schedule_id);
 
+      // 校验：相同班次互换无意义
+      if (original.schedule_code_dict_item_id === target.schedule_code_dict_item_id) {
+        throw new AppError(
+          '两人班次相同，互换无意义（如"休"换"休"），请拒绝此申请或改为其他调班方式',
+          'SWAP_SAME_SHIFT',
+        );
+      }
+
+      // 冻结原班次快照（如果尚未写入）
+      if (!request.original_schedule_code_dict_item_id) {
+        await supabase.from('shift_change_request').update({
+          original_schedule_code_dict_item_id: original.schedule_code_dict_item_id,
+          original_schedule_date: original.schedule_date,
+          original_planned_hours: original.planned_hours,
+        }).eq('id', payload.shiftChangeRequestId);
+      }
+
       // Swap the schedule_code and shift_type between the two records
       await Promise.all([
         supabase.from('schedule').update({
@@ -377,6 +397,15 @@ export async function approveShiftChange(payload: ShiftChangeApprovePayload) {
 
       if (origErr || !originalSchedule) {
         throw toAppError(origErr || new Error('未找到原排班'), '审批调班失败');
+      }
+
+      // 冻结原班次快照（如果尚未写入）
+      if (!request.original_schedule_code_dict_item_id) {
+        await supabase.from('shift_change_request').update({
+          original_schedule_code_dict_item_id: originalSchedule.schedule_code_dict_item_id,
+          original_schedule_date: originalSchedule.schedule_date,
+          original_planned_hours: originalSchedule.planned_hours,
+        }).eq('id', payload.shiftChangeRequestId);
       }
 
       // Get rest code dict item
