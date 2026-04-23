@@ -542,8 +542,13 @@ Page({
         const weekEnd = weekEndObj.toISOString().split('T')[0]
 
         try {
+          // 仅查询激活版本的排班，避免多版本数据重复累加
+          const versionIds = this.data._activeVersionIds
+          let vf = ''
+          if (versionIds.length > 0) vf = `&schedule_version_id=in.(${versionIds.join(',')})`
+
           const monthSchedules: any[] = await query('schedule',
-            `employee_id=eq.${emp.id}&schedule_date=gte.${monthStart}&schedule_date=lte.${monthEndStr}&select=schedule_date,planned_hours,schedule_code_dict_item_id`
+            `employee_id=eq.${emp.id}&schedule_date=gte.${monthStart}&schedule_date=lte.${monthEndStr}${vf}&select=schedule_date,planned_hours,schedule_code_dict_item_id`
           )
 
           // 获取排班编码分类信息
