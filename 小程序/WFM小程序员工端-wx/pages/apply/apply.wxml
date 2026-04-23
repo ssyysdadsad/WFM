@@ -217,8 +217,8 @@ module.exports.firstChar = function(str, fallback) {
           <view wx:if="{{item.alreadySignedUp}}" class="urgent-btn-disabled">
             <text>已报名</text>
           </view>
-          <view wx:elif="{{item.hasConflict}}" class="urgent-btn-conflict">
-            <text>时间冲突</text>
+          <view wx:elif="{{item.hasConflict}}" class="urgent-btn-warn" bindtap="onSignupUrgent" data-id="{{item.id}}" data-title="{{item.title}}">
+            <text>⚠️ 我要报名</text>
           </view>
           <view wx:else class="urgent-btn" bindtap="onSignupUrgent" data-id="{{item.id}}" data-title="{{item.title}}">
             <text>我要报名</text>

@@ -279,6 +279,15 @@
   font-size: 28rpx;
   font-weight: 600;
 }
+.urgent-btn-warn {
+  background: linear-gradient(135deg, #FFA726, #F57C00);
+  color: #fff;
+  padding: 14rpx 40rpx;
+  border-radius: 16rpx;
+  font-size: 28rpx;
+  font-weight: 700;
+  box-shadow: 0 4rpx 16rpx rgba(255,152,0,0.3);
+}
 
 /* Signup card */
 .urgent-signup-card {
