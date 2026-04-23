@@ -78,21 +78,6 @@ module.exports.firstChar = function(str, fallback) {
           <text wx:if="{{myShiftIsRest}}" class="field-error">已是休息日，无需调班</text>
         </view>
       </view>
-
-      <text class="field-label">目标日期（可选）</text>
-      <picker mode="date" value="{{formTargetDate}}" bindchange="onTargetDateChange">
-        <view class="input-box">
-          <text class="{{formTargetDate ? 'input-value' : 'input-placeholder'}}">{{formTargetDate || '请选择目标日期'}}</text>
-          <text class="input-icon">📅</text>
-        </view>
-      </picker>
-
-      <text class="field-label">目标班次</text>
-      <picker range="{{shiftOptions}}" range-key="label" value="{{shiftPickerIndex}}" bindchange="onShiftPickerChange">
-        <view class="input-box">
-          <text class="{{formTargetShiftLabel ? 'input-value' : 'input-placeholder'}}">{{formTargetShiftLabel || '选择班次'}}</text>
-        </view>
-      </picker>
     </block>
 
     <!-- ===== SWAP FORM ===== -->
