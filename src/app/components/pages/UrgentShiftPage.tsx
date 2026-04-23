@@ -2,11 +2,11 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Button, Table, Modal, Form, Input, Select, InputNumber, DatePicker,
   TimePicker, Space, Tag, Typography, message, Drawer, Tooltip, Badge,
-  Popconfirm, Descriptions, Empty, Spin, Alert,
+  Popconfirm, Descriptions, Empty, Spin, Alert, Collapse,
 } from 'antd';
 import {
   PlusOutlined, ThunderboltOutlined, CheckOutlined, CloseOutlined,
-  SendOutlined, TeamOutlined, ReloadOutlined, EyeOutlined,
+  SendOutlined, TeamOutlined, ReloadOutlined, EyeOutlined, WarningOutlined,
   EditOutlined, DeleteOutlined, StopOutlined, InfoCircleOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
@@ -67,6 +67,7 @@ export function UrgentShiftPage() {
   const [signupShift, setSignupShift] = useState<UrgentShiftRecord | null>(null);
   const [signups, setSignups] = useState<UrgentShiftSignupRecord[]>([]);
   const [signupsLoading, setSignupsLoading] = useState(false);
+  const [signupWarningsMap, setSignupWarningsMap] = useState<Record<string, LaborRuleWarning[]>>({});
 
   // Eligible employees modal
   const [eligibleModalOpen, setEligibleModalOpen] = useState(false);
@@ -165,9 +166,21 @@ export function UrgentShiftPage() {
     setSignupShift(record);
     setSignupDrawerOpen(true);
     setSignupsLoading(true);
+    setSignupWarningsMap({});
     try {
-      const data = await listSignups(record.id);
-      setSignups(data);
+      const [signupData, eligibleData] = await Promise.all([
+        listSignups(record.id),
+        findEligibleEmployees(record.shiftDate, record.startTime, record.endTime, record.skillId),
+      ]);
+      setSignups(signupData);
+      // 构建员工ID -> 用工规则警告的映射
+      const warnMap: Record<string, LaborRuleWarning[]> = {};
+      eligibleData.forEach(e => {
+        if (e.laborWarnings && e.laborWarnings.length > 0) {
+          warnMap[e.employeeId] = e.laborWarnings;
+        }
+      });
+      setSignupWarningsMap(warnMap);
     } catch (err) {
       message.error(getErrorMessage(err, '加载报名失败'));
     } finally {
@@ -430,7 +443,7 @@ export function UrgentShiftPage() {
           </div>
         }
         open={signupDrawerOpen} onClose={() => setSignupDrawerOpen(false)}
-        width={640}
+        width={820}
       >
         {signupsLoading ? (
           <div style={{ textAlign: 'center', padding: 60 }}><Spin /></div>
@@ -446,9 +459,33 @@ export function UrgentShiftPage() {
                   <div style={{ fontSize: 11, color: '#999' }}>{r.employeeNo}</div>
                 </div>
               )},
-              { title: '部门', dataIndex: 'departmentName', width: 100 },
-              { title: '备注', dataIndex: 'remark', width: 120, render: (v: string) => v || '-' },
-              { title: '报名时间', width: 140, render: (_: any, r: UrgentShiftSignupRecord) => dayjs(r.createdAt).format('MM-DD HH:mm') },
+              { title: '部门', dataIndex: 'departmentName', width: 80 },
+              { title: '用工风险', width: 180, render: (_: any, r: UrgentShiftSignupRecord) => {
+                const warnings = signupWarningsMap[r.employeeId] || [];
+                if (warnings.length === 0) return <Tag color="success" style={{ fontSize: 11 }}>✓ 无风险</Tag>;
+                const hardWarns = warnings.filter(w => w.level === 'hard');
+                const softWarns = warnings.filter(w => w.level === 'soft');
+                return (
+                  <div style={{ lineHeight: 1.6 }}>
+                    {hardWarns.map((w, i) => (
+                      <Tooltip key={`h${i}`} title={`[强制] ${w.ruleName}: ${w.message}`}>
+                        <Tag color="error" style={{ fontSize: 11, marginBottom: 2, cursor: 'pointer' }}>
+                          ⛔ {w.message.length > 14 ? w.message.substring(0, 14) + '...' : w.message}
+                        </Tag>
+                      </Tooltip>
+                    ))}
+                    {softWarns.map((w, i) => (
+                      <Tooltip key={`s${i}`} title={`[建议] ${w.ruleName}: ${w.message}`}>
+                        <Tag color="warning" style={{ fontSize: 11, marginBottom: 2, cursor: 'pointer' }}>
+                          ⚠ {w.message.length > 14 ? w.message.substring(0, 14) + '...' : w.message}
+                        </Tag>
+                      </Tooltip>
+                    ))}
+                  </div>
+                );
+              }},
+              { title: '备注', dataIndex: 'remark', width: 80, render: (v: string) => v || '-' },
+              { title: '报名时间', width: 120, render: (_: any, r: UrgentShiftSignupRecord) => dayjs(r.createdAt).format('MM-DD HH:mm') },
               { title: '状态', width: 80, render: (_: any, r: UrgentShiftSignupRecord) => (
                 <Tag color={SIGNUP_STATUS_COLORS[r.status]}>{SIGNUP_STATUS_LABELS[r.status]}</Tag>
               )},
