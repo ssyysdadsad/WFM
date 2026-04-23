@@ -186,11 +186,22 @@ export async function findEligibleEmployees(
     });
   }
 
-  // 3. Get all schedules on the target date
-  const { data: schedulesOnDate } = await supabase
+  // 3. 获取激活版本ID（提前查询，后续排班查询统一过滤）
+  const { data: activeVersions } = await supabase
+    .from('schedule_version')
+    .select('id')
+    .eq('is_active', true);
+  const activeVersionIds = (activeVersions || []).map((v: any) => v.id);
+
+  // 4. Get all schedules on the target date (only active versions)
+  let schedOnDateQuery = supabase
     .from('schedule')
     .select('employee_id, schedule_code_dict_item_id')
     .eq('schedule_date', shiftDate);
+  if (activeVersionIds.length > 0) {
+    schedOnDateQuery = schedOnDateQuery.in('schedule_version_id', activeVersionIds);
+  }
+  const { data: schedulesOnDate } = await schedOnDateQuery;
 
   // Build map: employee_id -> their schedule codes
   const empScheduleMap = new Map<string, string[]>();
@@ -252,12 +263,16 @@ export async function findEligibleEmployees(
   const weekStart = weekStartObj.toISOString().split('T')[0];
   const weekEnd = weekEndObj.toISOString().split('T')[0];
 
-  // Fetch monthly schedules for all employees (for labor rule checks)
-  const { data: monthSchedules } = await supabase
+  // Fetch monthly schedules for all employees (for labor rule checks) - 只查激活版本
+  let monthScheduleQuery = supabase
     .from('schedule')
     .select('employee_id, schedule_date, planned_hours, schedule_code_dict_item_id')
     .gte('schedule_date', monthStart)
     .lte('schedule_date', monthEndStr);
+  if (activeVersionIds.length > 0) {
+    monthScheduleQuery = monthScheduleQuery.in('schedule_version_id', activeVersionIds);
+  }
+  const { data: monthSchedules } = await monthScheduleQuery;
 
   // Build employee schedule data maps
   const empMonthHoursMap = new Map<string, number>();

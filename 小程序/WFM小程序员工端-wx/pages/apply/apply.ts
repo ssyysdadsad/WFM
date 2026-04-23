@@ -56,8 +56,10 @@ Page({
     }
     this.loadRequests()
     this.loadShiftOptions()
-    this.loadActiveVersionIds()
-    this.loadUrgentShifts()
+    // 先加载激活版本ID，再加载紧急班次（需用到版本过滤）
+    this.loadActiveVersionIds().then(() => {
+      this.loadUrgentShifts()
+    })
   },
 
   switchTab(e: any) {
@@ -543,7 +545,13 @@ Page({
 
         try {
           // 仅查询激活版本的排班，避免多版本数据重复累加
-          const versionIds = this.data._activeVersionIds
+          let versionIds = this.data._activeVersionIds
+          if (versionIds.length === 0) {
+            // 异步竞态：版本ID可能还没加载完，在此直接查询
+            const vers: any[] = await query('schedule_version', 'is_active=eq.true&select=id')
+            versionIds = vers.map(v => v.id)
+            this.setData({ _activeVersionIds: versionIds })
+          }
           let vf = ''
           if (versionIds.length > 0) vf = `&schedule_version_id=in.(${versionIds.join(',')})`
 
