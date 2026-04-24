@@ -823,6 +823,7 @@ export function EmployeePage() {
                     />
                   </>
                 ),
+              },
             ]}
           />
         )}
