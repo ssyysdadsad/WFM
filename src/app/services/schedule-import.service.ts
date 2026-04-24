@@ -311,6 +311,7 @@ export async function importScheduleExcel(params: {
           plannedHours: resolveImportHours(codeItem),
           sourceType: 'excel',
           remark: `导入批次 ${batchId}`,
+          sortOrder: row.rowIndex,
         });
       });
     });

@@ -269,6 +269,17 @@ export function ScheduleMatrixPage() {
 
   const involvedEmpIds = useMemo(() => new Set(schedules.map(s => s.employeeId)), [schedules]);
 
+  // 从排班数据中提取每个员工的 sort_order（取该员工任意一条记录的值）
+  const empSortOrderMap = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const s of schedules) {
+      if (s.sortOrder != null && !map.has(s.employeeId)) {
+        map.set(s.employeeId, s.sortOrder);
+      }
+    }
+    return map;
+  }, [schedules]);
+
   const filteredEmployees = useMemo(() => {
     let emps = allEmployees;
     // Filter by department
@@ -278,8 +289,16 @@ export function ScheduleMatrixPage() {
       const keyword = searchText.trim().toLowerCase();
       emps = emps.filter(e => e.fullName.toLowerCase().includes(keyword) || (e.employeeNo || '').toLowerCase().includes(keyword));
     }
+    // 按导入的行号排序（sortOrder），没有 sortOrder 的排到后面
+    if (empSortOrderMap.size > 0) {
+      emps = [...emps].sort((a, b) => {
+        const oa = empSortOrderMap.get(a.id) ?? 99999;
+        const ob = empSortOrderMap.get(b.id) ?? 99999;
+        return oa - ob;
+      });
+    }
     return emps;
-  }, [allEmployees, selectedDept, searchText]);
+  }, [allEmployees, selectedDept, searchText, empSortOrderMap]);
 
   // matrix rows
   const matrixData = useMemo(() => {

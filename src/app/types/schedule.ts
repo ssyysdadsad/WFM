@@ -51,6 +51,7 @@ export type ScheduleCellRecord = {
   plannedHours?: number | null;
   sourceType?: string | null;
   remark?: string | null;
+  sortOrder?: number | null;
 };
 
 export type ScheduleCellChange = {
@@ -65,6 +66,7 @@ export type ScheduleCellChange = {
   plannedHours?: number | null;
   sourceType?: string | null;
   remark?: string | null;
+  sortOrder?: number | null;
 };
 
 export type ScheduleMatrixFilters = {

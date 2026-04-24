@@ -30,6 +30,7 @@ function mapScheduleRow(row: any): ScheduleCellRecord {
     plannedHours: row.planned_hours,
     sourceType: row.source_type,
     remark: row.remark,
+    sortOrder: row.sort_order ?? null,
   };
 }
 
@@ -282,6 +283,7 @@ export async function bulkUpsertScheduleCells(params: {
       planned_hours: change.plannedHours ?? null,
       source_type: change.sourceType ?? 'manual',
       remark: change.remark ?? null,
+      sort_order: change.sortOrder ?? 0,
     };
 
     if (existingRows?.[0]?.id) {
