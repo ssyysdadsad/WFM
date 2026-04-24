@@ -117,3 +117,10 @@ export async function saveDictItem(dictTypeId: string, payload: DictItemFormValu
     throw toAppError(error, '保存字典项失败');
   }
 }
+
+export async function deleteDictItem(id: string) {
+  const { error } = await supabase.from('dict_item').delete().eq('id', id);
+  if (error) {
+    throw toAppError(error, '删除字典项失败');
+  }
+}

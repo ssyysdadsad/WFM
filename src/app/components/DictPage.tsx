@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Table, Button, Modal, Form, Input, Switch, Space, Typography, message, Tag, InputNumber, TimePicker, ColorPicker, Select } from 'antd';
 import dayjs from 'dayjs';
-import { PlusOutlined, EditOutlined, ReloadOutlined, BookOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, ReloadOutlined, BookOutlined, DeleteOutlined } from '@ant-design/icons';
 import { getErrorMessage } from '@/app/lib/supabase/errors';
 import { parseDictExtraConfig } from '@/app/lib/validators/dict';
 import { invalidateDictCache, useDict } from '@/app/hooks/useDict';
-import { listDictTypes, saveDictItem, saveDictType } from '@/app/services/dict.service';
+import { listDictTypes, saveDictItem, saveDictType, deleteDictItem } from '@/app/services/dict.service';
 import type { DictItem, DictType } from '@/app/types/dict';
 
 export function DictPage() {
@@ -272,48 +272,75 @@ export function DictPage() {
               {
                 title: '操作',
                 key: 'action',
-                width: 60,
+                width: 80,
                 render: (_: unknown, record: DictItem) => (
-                  <Button
-                    type="link"
-                    size="small"
-                    icon={<EditOutlined />}
-                    onClick={() => {
-                      setEditingItem(record);
-                      const isShiftType = selectedType?.typeCode === 'shift_type';
-                      const isScheduleCode = selectedType?.typeCode === 'schedule_code';
-                      const parsedExtra: Record<string, any> = (record.extraConfig || {}) as Record<string, any>;
-                      
-                      itemForm.setFieldsValue({
-                        item_code: record.itemCode,
-                        item_name: record.itemName,
-                        description: record.description,
-                        sort_order: record.sortOrder,
-                        is_enabled: record.isEnabled,
-                        extra_config: record.extraConfig ? JSON.stringify(record.extraConfig, null, 2) : '',
-                        ...(isShiftType && {
-                          shift_start_time: parsedExtra.start_time ? dayjs(parsedExtra.start_time, 'HH:mm') : null,
-                          shift_end_time: parsedExtra.end_time ? dayjs(parsedExtra.end_time, 'HH:mm') : null,
-                          shift_planned_hours: parsedExtra.planned_hours ?? 8,
-                          shift_count_as_hours: parsedExtra.count_as_hours ?? true,
-                          shift_color: parsedExtra.color ?? '#1677ff',
-                        }),
-                        ...(isScheduleCode && {
-                          sc_excel_code: parsedExtra.excel_code ?? '',
-                          sc_aliases: parsedExtra.aliases ?? [],
-                          sc_category: parsedExtra.category ?? 'work',
-                          sc_count_as_hours: parsedExtra.count_as_hours ?? true,
-                          sc_standard_hours: parsedExtra.standard_hours ?? 8,
-                          sc_start_time: parsedExtra.start_time ? dayjs(parsedExtra.start_time, 'HH:mm') : null,
-                          sc_end_time: parsedExtra.end_time ? dayjs(parsedExtra.end_time, 'HH:mm') : null,
-                          sc_color: parsedExtra.color ?? '#10B981',
-                          sc_allow_empty_task: parsedExtra.allow_empty_task ?? true,
-                          sc_allow_empty_device: parsedExtra.allow_empty_device ?? true,
-                        })
-                      });
-                      setItemModal(true);
-                    }}
-                  />
+                  <Space size={0}>
+                    <Button
+                      type="link"
+                      size="small"
+                      icon={<EditOutlined />}
+                      onClick={() => {
+                        setEditingItem(record);
+                        const isShiftType = selectedType?.typeCode === 'shift_type';
+                        const isScheduleCode = selectedType?.typeCode === 'schedule_code';
+                        const parsedExtra: Record<string, any> = (record.extraConfig || {}) as Record<string, any>;
+                        
+                        itemForm.setFieldsValue({
+                          item_code: record.itemCode,
+                          item_name: record.itemName,
+                          description: record.description,
+                          sort_order: record.sortOrder,
+                          is_enabled: record.isEnabled,
+                          extra_config: record.extraConfig ? JSON.stringify(record.extraConfig, null, 2) : '',
+                          ...(isShiftType && {
+                            shift_start_time: parsedExtra.start_time ? dayjs(parsedExtra.start_time, 'HH:mm') : null,
+                            shift_end_time: parsedExtra.end_time ? dayjs(parsedExtra.end_time, 'HH:mm') : null,
+                            shift_planned_hours: parsedExtra.planned_hours ?? 8,
+                            shift_count_as_hours: parsedExtra.count_as_hours ?? true,
+                            shift_color: parsedExtra.color ?? '#1677ff',
+                          }),
+                          ...(isScheduleCode && {
+                            sc_excel_code: parsedExtra.excel_code ?? '',
+                            sc_aliases: parsedExtra.aliases ?? [],
+                            sc_category: parsedExtra.category ?? 'work',
+                            sc_count_as_hours: parsedExtra.count_as_hours ?? true,
+                            sc_standard_hours: parsedExtra.standard_hours ?? 8,
+                            sc_start_time: parsedExtra.start_time ? dayjs(parsedExtra.start_time, 'HH:mm') : null,
+                            sc_end_time: parsedExtra.end_time ? dayjs(parsedExtra.end_time, 'HH:mm') : null,
+                            sc_color: parsedExtra.color ?? '#10B981',
+                            sc_allow_empty_task: parsedExtra.allow_empty_task ?? true,
+                            sc_allow_empty_device: parsedExtra.allow_empty_device ?? true,
+                          })
+                        });
+                        setItemModal(true);
+                      }}
+                    />
+                    <Button
+                      type="link"
+                      size="small"
+                      danger
+                      icon={<DeleteOutlined />}
+                      onClick={() => {
+                        Modal.confirm({
+                          title: '确认删除',
+                          content: `确定要删除字典项「${record.itemName}」吗？`,
+                          okText: '删除',
+                          okType: 'danger',
+                          cancelText: '取消',
+                          onOk: async () => {
+                            try {
+                              await deleteDictItem(record.id);
+                              if (selectedType) invalidateDictCache(selectedType.typeCode);
+                              message.success('删除成功');
+                              await refreshItems();
+                            } catch (error) {
+                              message.error(getErrorMessage(error, '删除字典项失败'));
+                            }
+                          },
+                        });
+                      }}
+                    />
+                  </Space>
                 ),
               },
             ]}
