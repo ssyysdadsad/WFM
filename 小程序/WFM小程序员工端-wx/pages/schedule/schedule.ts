@@ -229,20 +229,21 @@ Page({
       const startDate = `${yearMonth}-01`
       const endDate = `${yearMonth}-${String(daysInMonth).padStart(2, '0')}`
 
-      // 查找当前生效版本
+      // 查找当前已发布的激活版本
       const activeVersions: any[] = await query('schedule_version',
-        `is_active=eq.true&select=id`
+        `is_active=eq.true&published_at=not.is.null&select=id`
       )
-      let versionFilter = ''
+      
+      let rows: any[] = []
       if (activeVersions && activeVersions.length > 0) {
         const versionIds = activeVersions.map(v => v.id)
-        versionFilter = `&schedule_version_id=in.(${versionIds.join(',')})`
+        const versionFilter = `&schedule_version_id=in.(${versionIds.join(',')})`
+        
+        // Fetch schedule（只查已发布的激活版本数据）
+        rows = await query('schedule',
+          `employee_id=eq.${emp.id}&schedule_date=gte.${startDate}&schedule_date=lte.${endDate}${versionFilter}&select=schedule_date,schedule_code_dict_item_id,planned_hours,project_id&order=schedule_date`
+        )
       }
-      
-      // Fetch schedule（只查当前生效版本的数据）
-      const rows: any[] = await query('schedule',
-        `employee_id=eq.${emp.id}&schedule_date=gte.${startDate}&schedule_date=lte.${endDate}${versionFilter}&select=schedule_date,schedule_code_dict_item_id,planned_hours,project_id&order=schedule_date`
-      )
 
       // Fetch code items
       const codeIds = [...new Set(rows.map(r => r.schedule_code_dict_item_id).filter(Boolean))]

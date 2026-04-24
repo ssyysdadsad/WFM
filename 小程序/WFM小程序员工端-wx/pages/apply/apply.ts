@@ -181,7 +181,7 @@ Page({
   // ===== Data loaders =====
   async loadActiveVersionIds() {
     try {
-      const versions: any[] = await query('schedule_version', 'is_active=eq.true&select=id')
+      const versions: any[] = await query('schedule_version', 'is_active=eq.true&published_at=not.is.null&select=id')
       this.setData({ _activeVersionIds: versions.map(v => v.id) })
     } catch (e) { /* ignore */ }
   },
@@ -548,9 +548,12 @@ Page({
           let versionIds = this.data._activeVersionIds
           if (versionIds.length === 0) {
             // 异步竞态：版本ID可能还没加载完，在此直接查询
-            const vers: any[] = await query('schedule_version', 'is_active=eq.true&select=id')
+            const vers: any[] = await query('schedule_version', 'is_active=eq.true&published_at=not.is.null&select=id')
             versionIds = vers.map(v => v.id)
             this.setData({ _activeVersionIds: versionIds })
+          }
+          if (versionIds.length === 0) {
+            // 没有已发布的激活版本，不查排班
           }
           let vf = ''
           if (versionIds.length > 0) vf = `&schedule_version_id=in.(${versionIds.join(',')})`

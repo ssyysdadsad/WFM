@@ -136,16 +136,16 @@ Page({
   },
 
   async fetchSchedule(employeeId: string, startDate: string, endDate: string): Promise<any[]> {
-    // Step 1: 查找当前生效版本（is_active=true）
+    // Step 1: 查找当前已发布的激活版本（published_at不为空 且 is_active=true）
     const activeVersions: any[] = await query('schedule_version',
-      `is_active=eq.true&select=id`
+      `is_active=eq.true&published_at=not.is.null&select=id`
     )
     
-    let versionFilter = ''
-    if (activeVersions && activeVersions.length > 0) {
-      const versionIds = activeVersions.map(v => v.id)
-      versionFilter = `&schedule_version_id=in.(${versionIds.join(',')})`
-    }
+    // 没有已发布的激活版本时，不返回任何排班数据
+    if (!activeVersions || activeVersions.length === 0) return []
+    
+    const versionIds = activeVersions.map(v => v.id)
+    const versionFilter = `&schedule_version_id=in.(${versionIds.join(',')})`
     
     const rows: any[] = await query('schedule',
       `employee_id=eq.${employeeId}&schedule_date=gte.${startDate}&schedule_date=lte.${endDate}${versionFilter}&select=schedule_date,schedule_code_dict_item_id,shift_type_dict_item_id,planned_hours,project_id&order=schedule_date`
