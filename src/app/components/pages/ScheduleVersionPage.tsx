@@ -320,7 +320,7 @@ export function ScheduleVersionPage() {
         <Typography.Title level={4} style={{ margin: 0 }}>排班版本管理</Typography.Title>
         <Space>
           <Button icon={<ReloadOutlined />} onClick={loadData}>刷新</Button>
-          <Button icon={<UploadOutlined />} onClick={() => {
+          <Button icon={<DownloadOutlined />} onClick={() => {
             importForm.setFieldsValue({
               project_id: filterProject,
               import_mode: 'cover_draft',
@@ -548,7 +548,7 @@ export function ScheduleVersionPage() {
                             <Button
                               type="link"
                               size="small"
-                              icon={<DownloadOutlined />}
+                              icon={<UploadOutlined />}
                               loading={exportingId === record.id}
                               onClick={() => handleExport(record)}
                             >
