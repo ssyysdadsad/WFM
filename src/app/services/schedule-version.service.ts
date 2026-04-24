@@ -215,6 +215,28 @@ export async function deleteScheduleVersion(versionId: string) {
     throw toAppError(deleteBatchError, '删除导入记录失败');
   }
 
+  // Get all schedule IDs for this version (needed to clean shift_change_request)
+  const { data: scheduleIds } = await supabase
+    .from('schedule')
+    .select('id')
+    .eq('schedule_version_id', versionId);
+
+  // Delete shift_change_request records that reference these schedules
+  if (scheduleIds && scheduleIds.length > 0) {
+    const ids = scheduleIds.map(s => s.id);
+    const { error: deleteShiftErr1 } = await supabase
+      .from('shift_change_request')
+      .delete()
+      .in('original_schedule_id', ids);
+    if (deleteShiftErr1) throw toAppError(deleteShiftErr1, '删除关联调班记录失败');
+
+    const { error: deleteShiftErr2 } = await supabase
+      .from('shift_change_request')
+      .delete()
+      .in('target_schedule_id', ids);
+    if (deleteShiftErr2) throw toAppError(deleteShiftErr2, '删除关联调班记录失败');
+  }
+
   // Then delete all schedule records belonging to this version
   const { error: deleteRecordsError } = await supabase
     .from('schedule')
