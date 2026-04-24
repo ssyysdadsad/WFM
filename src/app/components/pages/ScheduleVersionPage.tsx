@@ -8,6 +8,7 @@ import {
 import { useNavigate } from 'react-router';
 import dayjs from 'dayjs';
 import { getErrorMessage } from '@/app/lib/supabase/errors';
+import { supabase } from '@/app/components/supabase';
 import { ImportResultModal } from '@/app/components/schedule/ImportResultModal';
 import { useCurrentUser } from '@/app/hooks/useCurrentUser';
 import { useDict } from '@/app/hooks/useDict';
