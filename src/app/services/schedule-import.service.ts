@@ -321,6 +321,19 @@ export async function importScheduleExcel(params: {
         scheduleVersionId: versionId,
         changes,
       });
+
+      // 自动将导入的员工关联到项目（如果尚未关联）
+      const uniqueEmpIds = [...new Set(changes.map(c => c.employeeId))];
+      if (uniqueEmpIds.length > 0) {
+        const peRows = uniqueEmpIds.map(empId => ({
+          project_id: params.projectId,
+          employee_id: empId,
+          role: 'member',
+        }));
+        await supabase
+          .from('project_employee')
+          .upsert(peRows, { onConflict: 'project_id,employee_id' });
+      }
     }
 
     // Labor rule validation on imported data

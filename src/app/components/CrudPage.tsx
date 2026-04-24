@@ -54,6 +54,7 @@ interface CrudPageProps {
       selectQuery?: string;
     }) => Promise<{ data: any[]; total: number }>;
     save: (values: Record<string, any>, editingId?: string) => Promise<void>;
+    delete?: (id: string) => Promise<void>;
     loadForeignData?: (columns: ColumnConfig[]) => Promise<Record<string, any[]>>;
   };
 }
@@ -241,15 +242,8 @@ export function CrudPage({ title, tableName, columns, defaultSort = 'created_at'
 
   const handleDelete = async (record: any) => {
     try {
-      if (service) {
-        // 如果 service 提供了 delete 方法则调用，否则直接用 supabase
-        const svc = service as any;
-        if (typeof svc.delete === 'function') {
-          await svc.delete(record.id);
-        } else {
-          const { error } = await supabase.from(tableName).delete().eq('id', record.id);
-          if (error) throw error;
-        }
+      if (service?.delete) {
+        await service.delete(record.id);
       } else {
         const { error } = await supabase.from(tableName).delete().eq('id', record.id);
         if (error) throw error;

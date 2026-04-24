@@ -39,7 +39,7 @@ export function resolveShiftTypeDictItemId(codeItem?: ScheduleCodeItem | null) {
   return codeItem?.id || null;
 }
 
-export async function loadScheduleMatrixReferences() {
+export async function loadScheduleMatrixReferences(projectId?: string) {
   const [projectRes, departmentRes, employeeRes, dictTypeRes] = await Promise.all([
     supabase.from('project').select('id, project_name, project_code, start_date, end_date').order('project_name'),
     supabase.from('department').select('id, department_name').order('department_name'),
@@ -50,6 +50,19 @@ export async function loadScheduleMatrixReferences() {
   const firstError = projectRes.error || departmentRes.error || employeeRes.error || dictTypeRes.error;
   if (firstError) {
     throw toAppError(firstError, '加载排班矩阵基础数据失败');
+  }
+
+  // 如果指定了项目，加载项目成员来过滤员工
+  let projectMemberIds: Set<string> | null = null;
+  if (projectId) {
+    const { data: peData } = await supabase
+      .from('project_employee')
+      .select('employee_id')
+      .eq('project_id', projectId)
+      .eq('is_active', true);
+    if (peData && peData.length > 0) {
+      projectMemberIds = new Set(peData.map((r: any) => r.employee_id));
+    }
   }
 
   const types = dictTypeRes.data || [];
@@ -70,6 +83,19 @@ export async function loadScheduleMatrixReferences() {
     throw toAppError(codeRes.error, '加载排班编码失败');
   }
 
+  // 过滤员工：如果有项目成员数据，只返回项目成员
+  let employees = (employeeRes.data || []).map(
+    (row: any): ScheduleEmployeeOption => ({
+      id: row.id,
+      fullName: row.full_name,
+      employeeNo: row.employee_no,
+      departmentId: row.department_id,
+    }),
+  );
+  if (projectMemberIds) {
+    employees = employees.filter(e => projectMemberIds!.has(e.id));
+  }
+
   return {
     projects: (projectRes.data || []).map(
       (row: any): ScheduleProjectOption => ({
@@ -86,14 +112,7 @@ export async function loadScheduleMatrixReferences() {
         departmentName: row.department_name,
       }),
     ),
-    employees: (employeeRes.data || []).map(
-      (row: any): ScheduleEmployeeOption => ({
-        id: row.id,
-        fullName: row.full_name,
-        employeeNo: row.employee_no,
-        departmentId: row.department_id,
-      }),
-    ),
+    employees,
     codeItems: (codeRes.data || []).map(
       (row: any): ScheduleCodeItem => ({
         id: row.id,

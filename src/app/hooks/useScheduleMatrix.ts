@@ -39,9 +39,9 @@ export function useScheduleMatrix() {
   // Track explicit user version selection to prevent auto-override
   const explicitVersionRef = useRef<string | null>(null);
 
-  const refreshReferences = useCallback(async () => {
+  const refreshReferences = useCallback(async (forProjectId?: string) => {
     try {
-      const refs = await loadScheduleMatrixReferences();
+      const refs = await loadScheduleMatrixReferences(forProjectId);
       setProjects(refs.projects);
       setDepartments(refs.departments);
       setAllEmployees(refs.employees);
@@ -94,6 +94,15 @@ export function useScheduleMatrix() {
   useEffect(() => {
     refreshReferences();
   }, [refreshReferences]);
+
+  // 项目切换时重新加载项目成员（员工列表）
+  useEffect(() => {
+    if (selectedProject) {
+      loadScheduleMatrixReferences(selectedProject).then(refs => {
+        setAllEmployees(refs.employees);
+      }).catch(() => {});
+    }
+  }, [selectedProject]);
 
   useEffect(() => {
     if (!selectedProject) {
