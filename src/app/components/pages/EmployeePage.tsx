@@ -88,9 +88,7 @@ export function EmployeePage() {
   const [pwdLoading, setPwdLoading] = useState(false);
   const [accountStatusMap, setAccountStatusMap] = useState<Record<string, { hasAccount: boolean; mustChange: boolean }>>({});
 
-  // 排班历史
-  const [scheduleHistory, setScheduleHistory] = useState<any[]>([]);
-  const [scheduleHistoryLoading, setScheduleHistoryLoading] = useState(false);
+
 
   // 员工技能映射 { employeeId: skillName[] }
   const [allEmployeeSkillsMap, setAllEmployeeSkillsMap] = useState<Record<string, string[]>>({});
@@ -290,23 +288,9 @@ export function EmployeePage() {
     } catch (error) {
       message.error(getErrorMessage(error, '加载员工技能失败'));
     }
-    // 加载排班历史
-    loadScheduleHistory(record.id);
   }
 
-  async function loadScheduleHistory(employeeId: string) {
-    setScheduleHistoryLoading(true);
-    try {
-      const { data } = await supabase
-        .from('schedule')
-        .select('id, schedule_date, shift_code, work_hours, schedule_version_id')
-        .eq('employee_id', employeeId)
-        .order('schedule_date', { ascending: false })
-        .limit(50);
-      setScheduleHistory(data || []);
-    } catch { /* ignore */ }
-    finally { setScheduleHistoryLoading(false); }
-  }
+
 
   async function addSkill() {
     try {
@@ -839,31 +823,6 @@ export function EmployeePage() {
                     />
                   </>
                 ),
-              },
-              {
-                key: 'schedule',
-                label: <span><CalendarOutlined /> 排班历史</span>,
-                children: (
-                  <Table
-                    rowKey="id"
-                    size="small"
-                    loading={scheduleHistoryLoading}
-                    dataSource={scheduleHistory}
-                    pagination={{ pageSize: 10, showTotal: (t) => `共 ${t} 条` }}
-                    columns={[
-                      { title: '排班日期', dataIndex: 'schedule_date', width: 120 },
-                      {
-                        title: '班次', dataIndex: 'shift_code', width: 100,
-                        render: (v: string) => v ? <Tag color="blue">{v}</Tag> : <Tag>休息</Tag>,
-                      },
-                      {
-                        title: '工时', dataIndex: 'work_hours', width: 80,
-                        render: (v: number) => v ? `${v}h` : '-',
-                      },
-                    ]}
-                  />
-                ),
-              },
             ]}
           />
         )}
