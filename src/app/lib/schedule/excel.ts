@@ -38,12 +38,12 @@ function normalizeHeaderDate(value: unknown) {
 }
 
 /**
- * 在前 5 行内定位包含"排班"或"项目"字样的标题行
+ * 在前 5 行内定位包含"排班"或"项目"或"年X月"字样的标题行
  */
 function findTitleRowIndex(rows: any[][]): number {
   for (let i = 0; i < Math.min(5, rows.length); i++) {
     const text = (rows[i] ?? []).map((c: any) => String(c ?? '').trim()).filter(Boolean).join('');
-    if (text.includes('排班') || text.includes('项目')) return i;
+    if (text.includes('排班') || text.includes('项目') || /\d{4}年\d{1,2}月/.test(text)) return i;
   }
   return -1;
 }
@@ -414,12 +414,12 @@ export function buildScheduleWorkbook(input: {
   const projectLabel = input.projectName || '项目';
 
   // Row 0: 合并标题
-  const titleRow: any[] = [`${projectLabel}排班表（${year}年${month}月）`];
+  const titleRow: any[] = [`${year}年${month}月`];
 
-  // Row 1: 姓名 + 日号（使用 Excel 日期序列号以匹配模板格式）
-  const dateNumRow: any[] = ['姓名'];
-  // Row 2: 空 + 星期
-  const weekdayRow: any[] = [''];
+  // Row 1: A列空 + 日号
+  const dateNumRow: any[] = [''];
+  // Row 2: 姓名 + 星期
+  const weekdayRow: any[] = ['姓名'];
   for (let d = 1; d <= daysInMonth; d++) {
     const date = start.date(d);
     dateNumRow.push(d);
@@ -464,7 +464,15 @@ export function buildScheduleWorkbook(input: {
 // ============================================================
 //  生成「项目排班表」格式的模板（供用户下载填写）
 // ============================================================
-export function buildScheduleImportTemplate(scheduleMonth: string, projectName = '项目', exampleCodes?: string[]) {
+export function buildScheduleImportTemplate(
+  scheduleMonth: string,
+  projectName = '项目',
+  exampleCodes?: string[],
+  employeeRows?: Array<{
+    employeeName: string;
+    codesByDate: Record<string, string>;
+  }>,
+) {
   const start = dayjs(scheduleMonth).startOf('month');
   const daysInMonth = start.daysInMonth();
   const year = start.year();
@@ -472,26 +480,40 @@ export function buildScheduleImportTemplate(scheduleMonth: string, projectName =
 
   const WEEKDAY_MAP = ['日', '一', '二', '三', '四', '五', '六'];
 
-  // 第1行：标题（只填 A1，其余为空，合并单元格范围后续设置）
-  const titleRow = [`${projectName}排班表（${year}年${month}月）`];
+  // 第1行：标题 — 合并显示 "2026年4月"
+  const titleRow: any[] = [`${year}年${month}月`];
 
-  // 第2行：A列"姓名"，B列起填日期数字
-  const dateRow = ['姓名'];
-  const weekRow = [''];
+  // 第2行：A列空，B列起填日期数字 1,2,3...
+  const dateRow: any[] = [''];
+  // 第3行：A列"姓名"，B列起填星期
+  const weekRow: any[] = ['姓名'];
   for (let d = 1; d <= daysInMonth; d++) {
     const date = start.date(d);
-    dateRow.push(String(d));
+    dateRow.push(d);
     weekRow.push(WEEKDAY_MAP[date.day()]);
   }
 
-  // 示例数据行：从字典编码动态生成，无字典时使用通用占位
-  const codes = exampleCodes && exampleCodes.length > 0 ? exampleCodes : ['编码1', '编码2'];
-  const code1 = codes[0] || '编码1';
-  const code2 = codes[1] || codes[0] || '编码2';
-  const exampleRow1 = ['员工A', ...Array.from({ length: daysInMonth }, (_, i) => (i === 0 ? '(留空即跳过)' : code1))];
-  const exampleRow2 = ['员工B', ...Array.from({ length: daysInMonth }, () => code2)];
+  // 数据行：如果传入了实际员工数据则用真实数据，否则用示例
+  const dataRows: any[][] = [];
+  if (employeeRows && employeeRows.length > 0) {
+    for (const emp of employeeRows) {
+      const cells: any[] = [emp.employeeName];
+      for (let d = 1; d <= daysInMonth; d++) {
+        const scheduleDate = start.date(d).format('YYYY-MM-DD');
+        cells.push(emp.codesByDate[scheduleDate] || '');
+      }
+      dataRows.push(cells);
+    }
+  } else {
+    // 无员工数据时用示例行
+    const codes = exampleCodes && exampleCodes.length > 0 ? exampleCodes : ['A1', '休'];
+    const code1 = codes[0] || 'A1';
+    const code2 = codes[1] || codes[0] || '休';
+    dataRows.push(['员工A', ...Array.from({ length: daysInMonth }, () => code1)]);
+    dataRows.push(['员工B', ...Array.from({ length: daysInMonth }, () => code2)]);
+  }
 
-  const sheetData = [titleRow, dateRow, weekRow, exampleRow1, exampleRow2];
+  const sheetData = [titleRow, dateRow, weekRow, ...dataRows];
   const ws = XLSX.utils.aoa_to_sheet(sheetData);
 
   // 合并第1行标题单元格（A1 到最后一列）
@@ -499,7 +521,7 @@ export function buildScheduleImportTemplate(scheduleMonth: string, projectName =
   if (!ws['!merges']) ws['!merges'] = [];
   ws['!merges'].push({ s: { r: 0, c: 0 }, e: { r: 0, c: totalCols - 1 } });
 
-  // 第1行行高、加粗
+  // 行高
   if (!ws['!rows']) ws['!rows'] = [];
   ws['!rows'][0] = { hpt: 28 };
   ws['!rows'][1] = { hpt: 22 };
@@ -507,7 +529,7 @@ export function buildScheduleImportTemplate(scheduleMonth: string, projectName =
 
   // 列宽
   ws['!cols'] = [
-    { wch: 14 }, // 姓名列
+    { wch: 10 }, // 姓名列
     ...Array.from({ length: daysInMonth }, () => ({ wch: 5 })),
   ];
 

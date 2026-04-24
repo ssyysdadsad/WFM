@@ -695,15 +695,70 @@ export function ScheduleVersionPage() {
           <Form.Item label="模板">
             <Button
               icon={<DownloadOutlined />}
-              onClick={() => {
+              onClick={async () => {
                 try {
                   const month = importForm.getFieldValue('schedule_month');
                   const monthStr = month ? dayjs(month).format('YYYY-MM-01') : dayjs().format('YYYY-MM-01');
+                  const projectId = importForm.getFieldValue('project_id');
+                  const projectLabel = projectId ? (projMap[projectId] || '项目') : '项目';
                   const exampleCodes = scheduleCodeItems
                     .filter(item => item.isEnabled)
                     .slice(0, 3)
                     .map(item => item.itemName);
-                  const buffer = buildScheduleImportTemplate(monthStr, '项目', exampleCodes);
+
+                  // 查询项目下的员工和当前排班数据
+                  let employeeRows: Array<{ employeeName: string; codesByDate: Record<string, string> }> | undefined;
+                  if (projectId) {
+                    const { supabase } = await import('@/app/lib/supabase/client');
+
+                    // 查激活版本
+                    const { data: versions } = await supabase
+                      .from('schedule_version')
+                      .select('id')
+                      .eq('project_id', projectId)
+                      .eq('is_active', true)
+                      .limit(1);
+                    const versionId = versions?.[0]?.id;
+
+                    // 查项目关联的员工
+                    const { data: projEmps } = await supabase
+                      .from('project_employee')
+                      .select('employee_id, employee:employee_id(id, full_name, employee_no)')
+                      .eq('project_id', projectId);
+
+                    // 查编码名称映射
+                    const { data: dictItems } = await supabase
+                      .from('dict_item')
+                      .select('id, item_name');
+                    const codeMap = new Map<string, string>((dictItems || []).map((d: any) => [d.id, d.item_name]));
+
+                    if (projEmps && projEmps.length > 0) {
+                      const empIds = projEmps.map((pe: any) => pe.employee_id);
+
+                      // 如果有激活版本，查排班数据
+                      let scheduleMap = new Map<string, Record<string, string>>();
+                      if (versionId) {
+                        const { data: schedules } = await supabase
+                          .from('schedule')
+                          .select('employee_id, schedule_date, schedule_code_dict_item_id')
+                          .eq('schedule_version_id', versionId)
+                          .in('employee_id', empIds);
+
+                        (schedules || []).forEach((s: any) => {
+                          if (!scheduleMap.has(s.employee_id)) scheduleMap.set(s.employee_id, {});
+                          const codeName = codeMap.get(s.schedule_code_dict_item_id) || '';
+                          if (codeName) scheduleMap.get(s.employee_id)![s.schedule_date] = codeName;
+                        });
+                      }
+
+                      employeeRows = projEmps.map((pe: any) => ({
+                        employeeName: pe.employee?.full_name || '未知',
+                        codesByDate: scheduleMap.get(pe.employee_id) || {},
+                      }));
+                    }
+                  }
+
+                  const buffer = buildScheduleImportTemplate(monthStr, projectLabel, exampleCodes, employeeRows);
                   const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
                   const href = URL.createObjectURL(blob);
                   const a = document.createElement('a');
@@ -712,6 +767,7 @@ export function ScheduleVersionPage() {
                   a.click();
                   URL.revokeObjectURL(href);
                 } catch (e) {
+                  console.error('下载模板失败:', e);
                   message.error('下载模板失败');
                 }
               }}
