@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router';
-import { Card, Col, Row, Table, Tag, Typography, Spin, message, Badge, Select, Empty, Tooltip as AntTooltip } from 'antd';
+import { Card, Col, Row, Table, Tag, Typography, Spin, message, Badge, Select, Empty, Tooltip as AntTooltip, DatePicker } from 'antd';
+import dayjs from 'dayjs';
 import {
   TeamOutlined, ProjectOutlined, CalendarOutlined, ToolOutlined,
   NotificationOutlined, ClockCircleOutlined, ReloadOutlined,
@@ -88,6 +89,7 @@ export function DashboardPage() {
   const [todayLoading, setTodayLoading] = useState(false);
   const [projectFilter, setProjectFilter] = useState<string | undefined>(undefined);
   const [projectOptions, setProjectOptions] = useState<{ value: string; label: string }[]>([]);
+  const [statusDate, setStatusDate] = useState<dayjs.Dayjs>(dayjs());
 
   useEffect(() => {
     loadData();
@@ -95,10 +97,10 @@ export function DashboardPage() {
     loadTodayStatus();
   }, []);
 
-  // Reload today status when project filter changes
+  // Reload status when project filter or date changes
   useEffect(() => {
-    loadTodayStatus(projectFilter);
-  }, [projectFilter]);
+    loadTodayStatus(projectFilter, statusDate.format('YYYY-MM-DD'));
+  }, [projectFilter, statusDate]);
 
   async function loadProjectOptions() {
     try {
@@ -107,10 +109,10 @@ export function DashboardPage() {
     } catch { /* ignore */ }
   }
 
-  async function loadTodayStatus(pid?: string) {
+  async function loadTodayStatus(pid?: string, date?: string) {
     setTodayLoading(true);
     try {
-      const rows = await getTodayEmployeeStatus(pid);
+      const rows = await getTodayEmployeeStatus(pid, date);
       setTodayStatus(rows);
     } catch (error) {
       console.error('Load today status error:', error);
@@ -249,6 +251,8 @@ export function DashboardPage() {
         projectFilter={projectFilter}
         projectOptions={projectOptions}
         onProjectChange={setProjectFilter}
+        selectedDate={statusDate}
+        onDateChange={setStatusDate}
       />
 
       {/* Secondary Stats Row */}
@@ -403,14 +407,19 @@ function TodayEmployeeStatusPanel({
   projectFilter,
   projectOptions,
   onProjectChange,
+  selectedDate,
+  onDateChange,
 }: {
   data: TodayEmployeeRow[];
   loading: boolean;
   projectFilter: string | undefined;
   projectOptions: { value: string; label: string }[];
   onProjectChange: (v: string | undefined) => void;
+  selectedDate: dayjs.Dayjs;
+  onDateChange: (d: dayjs.Dayjs) => void;
 }) {
-  const today = new Date().toISOString().split('T')[0];
+  const isToday = selectedDate.isSame(dayjs(), 'day');
+  const dateLabel = isToday ? '今日' : selectedDate.format('MM-DD');
 
   const summary = useMemo(() => {
     const working = data.filter(r => r.category === 'work').length;
@@ -440,7 +449,7 @@ function TodayEmployeeStatusPanel({
       render: (v: string) => <span style={{ fontSize: 13 }}>{v}</span>,
     },
     {
-      title: '今日状态',
+      title: `${dateLabel}状态`,
       dataIndex: 'category',
       width: 100,
       filters: [
@@ -493,8 +502,14 @@ function TodayEmployeeStatusPanel({
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <UserOutlined style={{ color: '#1677ff' }} />
-            <span style={{ fontWeight: 600 }}>📋 今日员工状态</span>
-            <Tag color="blue" style={{ fontSize: 11, margin: 0 }}>{today}</Tag>
+            <span style={{ fontWeight: 600 }}>📋 员工排班状态</span>
+            <DatePicker
+              value={selectedDate}
+              onChange={(d) => d && onDateChange(d)}
+              allowClear={false}
+              size="small"
+              style={{ width: 130 }}
+            />
           </div>
           <Select
             allowClear
@@ -550,7 +565,7 @@ function TodayEmployeeStatusPanel({
           )}
         </div>
         <span style={{ fontSize: 11, color: '#999', whiteSpace: 'nowrap' }}>
-          今日总工时 <strong style={{ color: '#333' }}>{summary.totalHours.toFixed(1)}h</strong>
+          {dateLabel}总工时 <strong style={{ color: '#333' }}>{summary.totalHours.toFixed(1)}h</strong>
         </span>
       </div>
 

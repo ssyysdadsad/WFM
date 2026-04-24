@@ -398,8 +398,8 @@ export type TodayEmployeeRow = {
   projectId: string | null;
 };
 
-export async function getTodayEmployeeStatus(projectId?: string): Promise<TodayEmployeeRow[]> {
-  const today = new Date().toISOString().split('T')[0];
+export async function getTodayEmployeeStatus(projectId?: string, date?: string): Promise<TodayEmployeeRow[]> {
+  const targetDate = date || new Date().toISOString().split('T')[0];
 
   // Get all active schedule versions (optionally filter by project)
   let versionQuery = supabase.from('schedule_version').select('id, project_id, project:project_id(project_name)').eq('is_active', true);
@@ -417,7 +417,7 @@ export async function getTodayEmployeeStatus(projectId?: string): Promise<TodayE
     .from('schedule')
     .select('employee_id, schedule_version_id, planned_hours, schedule_code_dict_item_id')
     .in('schedule_version_id', versionIds)
-    .eq('schedule_date', today);
+    .eq('schedule_date', targetDate);
 
   // Get employee info
   const { data: employees } = await supabase
