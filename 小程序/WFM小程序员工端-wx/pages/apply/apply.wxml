@@ -124,10 +124,9 @@ module.exports.firstChar = function(str, fallback) {
         </view>
         <view class="form-col">
           <text class="field-label">对方班次</text>
-          <view class="input-box {{targetShiftIsRest ? 'input-error' : ''}}">
-            <text class="{{formTargetShiftLabel ? 'input-value' : 'input-placeholder'}}" style="{{targetShiftIsRest ? 'color:#D96B5A;' : ''}}">{{formTargetShiftLabel || '自动获取'}}</text>
+          <view class="input-box">
+            <text class="{{formTargetShiftLabel ? 'input-value' : 'input-placeholder'}}">{{formTargetShiftLabel || '自动获取'}}</text>
           </view>
-          <text wx:if="{{targetShiftIsRest}}" class="field-error">休息日无法互换</text>
         </view>
       </view>
     </block>
