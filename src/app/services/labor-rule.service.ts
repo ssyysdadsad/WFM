@@ -486,14 +486,22 @@ function checkShiftInterval(
     const endMinutes = endH * 60 + (endM || 0);
     const startMinutes = startH * 60 + (startM || 0);
 
+    // 跨夜班次判断：当班次的结束时间 < 开始时间时，说明是跨夜班（如 22:00-06:00）
+    // 此时结束时间实际落在下一个日历日（即 date2 当天），所以间隔 = 后一天开始 - 前一天下班（同一天内）
+    const currStartMinutes = (() => {
+      const [sh, sm] = (curr.startTime || '').split(':').map(Number);
+      return (isNaN(sh) ? 0 : sh) * 60 + (sm || 0);
+    })();
+    const isOvernightShift = endMinutes < currStartMinutes;
+
     let intervalMinutes: number;
-    if (endMinutes <= 12 * 60 && endMinutes < startMinutes) {
-      // Overnight shift (e.g. end at 02:00 of DAY+1, next start at 09:00 of DAY+1)
-      // The shift actually ends on the next calendar day, so interval = startMinutes - endMinutes
+    if (isOvernightShift) {
+      // 跨夜班：结束时间落在 date2 当天（如 date1 22:00-02:00，实际02:00是date2凌晨）
+      // 间隔 = date2的上班时间 - date2凌晨的下班时间
       intervalMinutes = startMinutes - endMinutes;
     } else {
-      // Normal: shift ends same calendar day, next shift starts next calendar day
-      // interval = (24h - endMinutes) + startMinutes
+      // 正常班次：shift 在 date1 当天结束
+      // 间隔 = (24h - date1 下班时间) + date2 上班时间
       intervalMinutes = (24 * 60 - endMinutes) + startMinutes;
     }
 

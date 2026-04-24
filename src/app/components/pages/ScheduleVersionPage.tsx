@@ -575,9 +575,8 @@ export function ScheduleVersionPage() {
                                 <Button type="link" size="small" icon={<UndoOutlined />} style={{ color: '#52c41a' }}>恢复激活</Button>
                               </Popconfirm>
                             )}
-                            {!pub && (
-                              <Popconfirm
-                                title="确认删除此草稿版本？"
+                            <Popconfirm
+                                title="确认删除此版本？"
                                 description="版本及其所有排班数据将被永久删除，不可恢复。"
                                 onConfirm={() => handleDelete(record)}
                                 okText="确认删除"
@@ -586,7 +585,6 @@ export function ScheduleVersionPage() {
                               >
                                 <Button type="link" size="small" danger icon={<DeleteOutlined />}>删除</Button>
                               </Popconfirm>
-                            )}
                           </Space>
                         </div>
                       </div>
