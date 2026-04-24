@@ -42,8 +42,16 @@ function normalizeHeaderDate(value: unknown) {
  */
 function findTitleRowIndex(rows: any[][]): number {
   for (let i = 0; i < Math.min(5, rows.length); i++) {
-    const text = (rows[i] ?? []).map((c: any) => String(c ?? '').trim()).filter(Boolean).join('');
+    const row = rows[i] ?? [];
+    const text = row.map((c: any) => String(c ?? '').trim()).filter(Boolean).join('');
     if (text.includes('排班') || text.includes('项目') || /\d{4}年\d{1,2}月/.test(text)) return i;
+    // 支持标题行是一个 Excel 日期序列号（合并单元格显示日期）
+    const firstVal = Number(row[0]);
+    if (Number.isFinite(firstVal) && firstVal > 40000 && XLSX.SSF.parse_date_code(firstVal)) {
+      // 确认这行只有第一个单元格有值（合并行），或者下一行是日期行
+      const nonEmpty = row.filter((c: any) => c != null && String(c).trim() !== '').length;
+      if (nonEmpty <= 1) return i;
+    }
   }
   return -1;
 }
@@ -112,17 +120,33 @@ function isNonEmployeeRow(cellValue: string): boolean {
 function detectNewFormat(rows: any[][]): boolean {
   if (rows.length < 3) return false;
 
-  const titleIdx = findTitleRowIndex(rows);
-  if (titleIdx === -1) return false;
+  let titleIdx = findTitleRowIndex(rows);
+  
+  // 备用检测：如果找不到传统标题行，扫描前几行找日期行
+  if (titleIdx === -1) {
+    for (let i = 0; i < Math.min(4, rows.length); i++) {
+      const row = rows[i] ?? [];
+      const dateCells = row.filter((cell: any) => {
+        const v = Number(cell);
+        if (!Number.isFinite(v)) return false;
+        if (v > 366) return XLSX.SSF.parse_date_code(v) != null;
+        return Number.isInteger(v) && v >= 1 && v <= 31;
+      });
+      if (dateCells.length >= 15) {
+        // 这行是日期行，标题行在它上方（如果有），否则视为第0行
+        titleIdx = Math.max(0, i - 1);
+        return true;
+      }
+    }
+    return false;
+  }
 
   // 标题行下一行应该包含可解析为日期（序列号或1~31）的单元格
   const dateRow = rows[titleIdx + 1] ?? [];
   const hasDateLikeCells = dateRow.some((cell: any) => {
     const v = Number(cell);
     if (!Number.isFinite(v)) return false;
-    // Excel 序列号
     if (v > 366) return XLSX.SSF.parse_date_code(v) !== null && XLSX.SSF.parse_date_code(v) !== undefined;
-    // 纯日数
     return Number.isInteger(v) && v >= 1 && v <= 31;
   });
 
@@ -151,7 +175,17 @@ function parseNewFormat(
   // 尝试从标题提取年月，用于纯数字日期的回退解析
   const titleRow = rows[titleIdx] ?? [];
   const titleText = titleRow.map((c: any) => String(c ?? '').trim()).find((s) => /\d{4}/.test(s)) ?? '';
-  const titleYM = extractYearMonthFromTitle(titleText);
+  let titleYM = extractYearMonthFromTitle(titleText);
+  // 如果标题行是 Excel 日期序列号（合并单元格），从序列号提取年月
+  if (!titleYM) {
+    const firstVal = Number(titleRow[0]);
+    if (Number.isFinite(firstVal) && firstVal > 40000) {
+      const parsed = XLSX.SSF.parse_date_code(firstVal);
+      if (parsed) {
+        titleYM = { year: parsed.y, month: parsed.m };
+      }
+    }
+  }
 
   // 日期行（标题行的下一行）
   const dateRow = rows[titleIdx + 1] ?? [];
