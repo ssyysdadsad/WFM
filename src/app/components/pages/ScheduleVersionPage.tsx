@@ -625,6 +625,26 @@ export function ScheduleVersionPage() {
                     return <Tag color={batchStatusColorMap[value]}>{labelMap[value] || value}</Tag>;
                   }},
                   { title: '完成时间', dataIndex: 'completedAt', render: (value?: string | null) => value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '-' },
+                  { title: '操作', key: 'action', width: 80, render: (_: any, record: any) => (
+                    <Popconfirm
+                      title="确认删除此导入记录？"
+                      okText="删除"
+                      okButtonProps={{ danger: true }}
+                      cancelText="取消"
+                      onConfirm={async () => {
+                        try {
+                          const { error } = await supabase.from('schedule_import_batch').delete().eq('id', record.id);
+                          if (error) throw error;
+                          message.success('已删除');
+                          await loadData();
+                        } catch (e) {
+                          message.error(getErrorMessage(e, '删除失败'));
+                        }
+                      }}
+                    >
+                      <Button type="link" size="small" danger icon={<DeleteOutlined />}>删除</Button>
+                    </Popconfirm>
+                  )},
                 ]}
               />
             ),
