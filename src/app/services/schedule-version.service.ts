@@ -205,53 +205,9 @@ export async function publishScheduleVersion(payload: SchedulePublishPayload) {
 }
 
 export async function deleteScheduleVersion(versionId: string) {
-  // First delete import batch records
-  const { error: deleteBatchError } = await supabase
-    .from('schedule_import_batch')
-    .delete()
-    .eq('schedule_version_id', versionId);
-
-  if (deleteBatchError) {
-    throw toAppError(deleteBatchError, '删除导入记录失败');
-  }
-
-  // Get all schedule IDs for this version (needed to clean shift_change_request)
-  const { data: scheduleIds } = await supabase
-    .from('schedule')
-    .select('id')
-    .eq('schedule_version_id', versionId);
-
-  // Delete shift_change_request records that reference these schedules
-  if (scheduleIds && scheduleIds.length > 0) {
-    const ids = scheduleIds.map(s => s.id);
-    const { error: deleteShiftErr1 } = await supabase
-      .from('shift_change_request')
-      .delete()
-      .in('original_schedule_id', ids);
-    if (deleteShiftErr1) throw toAppError(deleteShiftErr1, '删除关联调班记录失败');
-
-    const { error: deleteShiftErr2 } = await supabase
-      .from('shift_change_request')
-      .delete()
-      .in('target_schedule_id', ids);
-    if (deleteShiftErr2) throw toAppError(deleteShiftErr2, '删除关联调班记录失败');
-  }
-
-  // Then delete all schedule records belonging to this version
-  const { error: deleteRecordsError } = await supabase
-    .from('schedule')
-    .delete()
-    .eq('schedule_version_id', versionId);
-
-  if (deleteRecordsError) {
-    throw toAppError(deleteRecordsError, '删除排班记录失败');
-  }
-
-  // Then delete the version itself
-  const { error } = await supabase
-    .from('schedule_version')
-    .delete()
-    .eq('id', versionId);
+  const { error } = await supabase.rpc('cascade_delete_schedule_version', {
+    p_version_id: versionId,
+  });
 
   if (error) {
     throw toAppError(error, '删除排班版本失败');
