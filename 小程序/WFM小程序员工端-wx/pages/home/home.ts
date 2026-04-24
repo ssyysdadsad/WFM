@@ -136,10 +136,18 @@ Page({
   },
 
   async fetchSchedule(employeeId: string, startDate: string, endDate: string): Promise<any[]> {
-    // Step 1: 查找当前已发布的激活版本（published_at不为空 且 is_active=true）
-    const activeVersions: any[] = await query('schedule_version',
-      `is_active=eq.true&published_at=not.is.null&select=id`
+    // Step 0: 查员工所属项目
+    const peRows: any[] = await query('project_employee',
+      `employee_id=eq.${employeeId}&is_active=eq.true&select=project_id`
     )
+    const myProjectIds = peRows.map(r => r.project_id)
+
+    // Step 1: 查找当前已发布的激活版本（限定员工所属项目）
+    let versionQuery = `is_active=eq.true&published_at=not.is.null&select=id`
+    if (myProjectIds.length > 0) {
+      versionQuery += `&project_id=in.(${myProjectIds.join(',')})`
+    }
+    const activeVersions: any[] = await query('schedule_version', versionQuery)
     
     // 没有已发布的激活版本时，不返回任何排班数据
     if (!activeVersions || activeVersions.length === 0) return []

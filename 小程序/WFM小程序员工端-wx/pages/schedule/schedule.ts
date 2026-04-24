@@ -229,10 +229,18 @@ Page({
       const startDate = `${yearMonth}-01`
       const endDate = `${yearMonth}-${String(daysInMonth).padStart(2, '0')}`
 
-      // 查找当前已发布的激活版本
-      const activeVersions: any[] = await query('schedule_version',
-        `is_active=eq.true&published_at=not.is.null&select=id`
+      // 查员工所属项目
+      const peRows: any[] = await query('project_employee',
+        `employee_id=eq.${emp.id}&is_active=eq.true&select=project_id`
       )
+      const myProjectIds = peRows.map(r => r.project_id)
+
+      // 查找当前已发布的激活版本（限定员工所属项目）
+      let versionQuery = `is_active=eq.true&published_at=not.is.null&select=id`
+      if (myProjectIds.length > 0) {
+        versionQuery += `&project_id=in.(${myProjectIds.join(',')})`
+      }
+      const activeVersions: any[] = await query('schedule_version', versionQuery)
       
       let rows: any[] = []
       if (activeVersions && activeVersions.length > 0) {

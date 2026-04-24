@@ -178,7 +178,19 @@ Page({
   // ===== Data loaders =====
   async loadActiveVersionIds() {
     try {
-      const versions: any[] = await query('schedule_version', 'is_active=eq.true&published_at=not.is.null&select=id')
+      const emp = getEmployee()
+      // 查员工所属项目
+      let versionQuery = 'is_active=eq.true&published_at=not.is.null&select=id'
+      if (emp?.id) {
+        const peRows: any[] = await query('project_employee',
+          `employee_id=eq.${emp.id}&is_active=eq.true&select=project_id`
+        )
+        const myProjectIds = peRows.map(r => r.project_id)
+        if (myProjectIds.length > 0) {
+          versionQuery += `&project_id=in.(${myProjectIds.join(',')})`
+        }
+      }
+      const versions: any[] = await query('schedule_version', versionQuery)
       this.setData({ _activeVersionIds: versions.map(v => v.id) })
     } catch (e) { /* ignore */ }
   },
@@ -542,8 +554,16 @@ Page({
           // 仅查询激活版本的排班，避免多版本数据重复累加
           let versionIds = this.data._activeVersionIds
           if (versionIds.length === 0) {
-            // 异步竞态：版本ID可能还没加载完，在此直接查询
-            const vers: any[] = await query('schedule_version', 'is_active=eq.true&published_at=not.is.null&select=id')
+            // 异步竞态：版本ID可能还没加载完，在此直接查询（含项目隔离）
+            let fallbackQuery = 'is_active=eq.true&published_at=not.is.null&select=id'
+            if (emp?.id) {
+              const peRows2: any[] = await query('project_employee',
+                `employee_id=eq.${emp.id}&is_active=eq.true&select=project_id`
+              )
+              const pids = peRows2.map(r => r.project_id)
+              if (pids.length > 0) fallbackQuery += `&project_id=in.(${pids.join(',')})`
+            }
+            const vers: any[] = await query('schedule_version', fallbackQuery)
             versionIds = vers.map(v => v.id)
             this.setData({ _activeVersionIds: versionIds })
           }
