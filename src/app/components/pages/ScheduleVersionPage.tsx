@@ -440,7 +440,7 @@ export function ScheduleVersionPage() {
                 <div>
                   {group.activeVersion ? (
                     <Tag color="green" icon={<CheckCircleFilled />} style={{ fontSize: 13 }}>
-                      v{group.activeVersion.versionNo} · {group.activeVersion.generationType === 'manual' ? '手工' : group.activeVersion.generationType === 'template' ? '模板' : 'Excel'}
+                      v{group.activeVersion.versionNo} · {group.activeVersion.generationType === 'manual' ? '手工' : group.activeVersion.generationType === 'template' ? '模板' : group.activeVersion.generationType === 'shift_change' ? '调班' : 'Excel'}
                     </Tag>
                   ) : (
                     <Tag color="default" icon={<ClockCircleOutlined />} style={{ color: '#999' }}>
@@ -506,8 +506,8 @@ export function ScheduleVersionPage() {
 
                         {/* Generation type */}
                         <div>
-                          <Tag color={record.generationType === 'excel' ? 'blue' : record.generationType === 'template' ? 'purple' : 'default'}>
-                            {record.generationType === 'manual' ? '手工' : record.generationType === 'template' ? '模板' : 'Excel'}
+                          <Tag color={record.generationType === 'excel' ? 'blue' : record.generationType === 'template' ? 'purple' : record.generationType === 'shift_change' ? 'orange' : 'default'}>
+                            {record.generationType === 'manual' ? '手工' : record.generationType === 'template' ? '模板' : record.generationType === 'shift_change' ? '调班' : 'Excel'}
                           </Tag>
                         </div>
 

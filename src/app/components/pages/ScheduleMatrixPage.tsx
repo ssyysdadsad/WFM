@@ -881,6 +881,15 @@ export function ScheduleMatrixPage() {
                       ⠿
                     </div>
                   )}
+                  {/* 调班审批来源角标 */}
+                  {schedule?.remark && schedule.remark.includes('调班审批') && (
+                    <div style={{
+                      position: 'absolute', top: 1, left: 1,
+                      width: 0, height: 0,
+                      borderLeft: '10px solid #fa8c16',
+                      borderBottom: '10px solid transparent',
+                    }} />
+                  )}
                 </>
               ) : (
                 <div style={{ fontSize: 12, color: '#ddd' }}>-</div>
@@ -952,6 +961,7 @@ export function ScheduleMatrixPage() {
                   <div><b>{code?.itemName || '?'}</b></div>
                   {timeDesc && <div style={{ color: '#d9d9d9' }}>{timeDesc}</div>}
                   <div>工时 {schedule.plannedHours ?? 0}h</div>
+                  {schedule.remark && <div style={{ color: '#faad14', marginTop: 4, borderTop: '1px solid rgba(255,255,255,0.15)', paddingTop: 4 }}>{schedule.remark}</div>}
                 </div>}
                 mouseEnterDelay={0.3}
               >

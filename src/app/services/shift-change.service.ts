@@ -334,149 +334,256 @@ export async function approveShiftChange(payload: ShiftChangeApprovePayload) {
   const approvedAt = new Date().toISOString();
 
   if (payload.action === 'approve') {
-    // === SWAP: Exchange schedules between two employees ===
+    // ============================================================
+    // 审批通过 → 创建新版本 → 复制排班 → 应用变更 → 自动发布
+    // ============================================================
+
+    // --- 1. 获取原排班记录和版本信息 ---
+    const { data: origScheduleRow, error: origErr } = await supabase
+      .from('schedule')
+      .select('*, schedule_version:schedule_version_id(id, project_id, schedule_month, version_no)')
+      .eq('id', request.original_schedule_id)
+      .single();
+
+    if (origErr || !origScheduleRow) {
+      throw toAppError(origErr || new Error('未找到原排班'), '审批调班失败');
+    }
+
+    const oldVersion = origScheduleRow.schedule_version as any;
+    const oldVersionId = oldVersion.id;
+
+    // 冻结原班次快照（如果尚未写入）
+    if (!request.original_schedule_code_dict_item_id) {
+      await supabase.from('shift_change_request').update({
+        original_schedule_code_dict_item_id: origScheduleRow.schedule_code_dict_item_id,
+        original_schedule_date: origScheduleRow.schedule_date,
+        original_planned_hours: origScheduleRow.planned_hours,
+      }).eq('id', payload.shiftChangeRequestId);
+    }
+
+    // 查申请人姓名（用于 remark）
+    const { data: applicantRow } = await supabase.from('employee').select('full_name').eq('id', request.applicant_employee_id).single();
+    const applicantName = applicantRow?.full_name || '员工';
+
+    // --- 2. 获取发布状态字典项 ---
+    const { data: publishedStatusRows } = await supabase
+      .from('dict_item')
+      .select('id')
+      .eq('item_code', 'published')
+      .limit(1);
+    const publishedStatusId = publishedStatusRows?.[0]?.id;
+    if (!publishedStatusId) {
+      throw new AppError('缺少 published 状态字典项', 'DICT_STATUS_MISSING');
+    }
+
+    // --- 3. 计算新版本号 ---
+    const { data: maxVersionRows } = await supabase
+      .from('schedule_version')
+      .select('version_no')
+      .eq('project_id', oldVersion.project_id)
+      .eq('schedule_month', oldVersion.schedule_month)
+      .order('version_no', { ascending: false })
+      .limit(1);
+    const newVersionNo = (maxVersionRows?.[0]?.version_no ?? 0) + 1;
+
+    // --- 构建版本备注 ---
+    let versionRemark = '';
+
+    // === SWAP: 先校验 ===
     if (request.request_type === 'swap' && request.target_schedule_id) {
-      const { data: schedules, error: scheduleError } = await supabase
+      const { data: targetScheduleRow } = await supabase
         .from('schedule')
         .select('*')
-        .in('id', [request.original_schedule_id, request.target_schedule_id]);
+        .eq('id', request.target_schedule_id)
+        .single();
 
-      if (scheduleError || !schedules || schedules.length < 2) {
-        throw toAppError(scheduleError || new Error('缺少目标排班数据'), '审批调班失败');
+      if (!targetScheduleRow) {
+        throw new AppError('缺少目标排班数据', 'MISSING_TARGET_SCHEDULE');
       }
 
-      const original = schedules.find((item: any) => item.id === request.original_schedule_id);
-      const target = schedules.find((item: any) => item.id === request.target_schedule_id);
-
-      // 校验：相同班次互换无意义
-      if (original.schedule_code_dict_item_id === target.schedule_code_dict_item_id) {
+      if (origScheduleRow.schedule_code_dict_item_id === targetScheduleRow.schedule_code_dict_item_id) {
         throw new AppError(
           '两人班次相同，互换无意义（如"休"换"休"），请拒绝此申请或改为其他调班方式',
           'SWAP_SAME_SHIFT',
         );
       }
 
-      // 冻结原班次快照（如果尚未写入）
-      if (!request.original_schedule_code_dict_item_id) {
-        await supabase.from('shift_change_request').update({
-          original_schedule_code_dict_item_id: original.schedule_code_dict_item_id,
-          original_schedule_date: original.schedule_date,
-          original_planned_hours: original.planned_hours,
-        }).eq('id', payload.shiftChangeRequestId);
-      }
-
-      // Swap the schedule_code and shift_type between the two records
-      await Promise.all([
-        supabase.from('schedule').update({
-          schedule_code_dict_item_id: target.schedule_code_dict_item_id,
-          shift_type_dict_item_id: target.shift_type_dict_item_id,
-          planned_hours: target.planned_hours,
-          remark: '通过调班审批执行互换',
-        }).eq('id', original.id),
-        supabase.from('schedule').update({
-          schedule_code_dict_item_id: original.schedule_code_dict_item_id,
-          shift_type_dict_item_id: original.shift_type_dict_item_id,
-          planned_hours: original.planned_hours,
-          remark: '通过调班审批执行互换',
-        }).eq('id', target.id),
-      ]);
+      const { data: targetEmpRow } = await supabase.from('employee').select('full_name').eq('id', request.target_employee_id).single();
+      const targetName = targetEmpRow?.full_name || '员工';
+      versionRemark = `调班审批: ${applicantName}与${targetName}互换班次(${origScheduleRow.schedule_date})`;
     }
 
-    // === DIRECT CHANGE: Find replacement, assign applicant's shift to them ===
+    // === DIRECT_CHANGE: 先校验 ===
     if (request.request_type === 'direct_change') {
       if (!payload.replacementEmployeeId) {
         throw new AppError('直接变更审批需指定替班人员', 'REPLACEMENT_REQUIRED');
       }
+      const { data: replEmpRow } = await supabase.from('employee').select('full_name').eq('id', payload.replacementEmployeeId).single();
+      const replName = replEmpRow?.full_name || '替班人员';
+      versionRemark = `调班审批: ${replName}替${applicantName}班(${origScheduleRow.schedule_date})`;
 
-      // Get original schedule
-      const { data: originalSchedule, error: origErr } = await supabase
-        .from('schedule')
-        .select('*')
-        .eq('id', request.original_schedule_id)
-        .single();
-
-      if (origErr || !originalSchedule) {
-        throw toAppError(origErr || new Error('未找到原排班'), '审批调班失败');
-      }
-
-      // 冻结原班次快照（如果尚未写入）
-      if (!request.original_schedule_code_dict_item_id) {
-        await supabase.from('shift_change_request').update({
-          original_schedule_code_dict_item_id: originalSchedule.schedule_code_dict_item_id,
-          original_schedule_date: originalSchedule.schedule_date,
-          original_planned_hours: originalSchedule.planned_hours,
-        }).eq('id', payload.shiftChangeRequestId);
-      }
-
-      // Get rest code dict item
-      const { data: restCodeRows } = await supabase
-        .from('dict_item')
-        .select('id')
-        .eq('item_name', '休')
-        .limit(1);
-      const restCodeId = restCodeRows?.[0]?.id;
-
-      // Get rest shift type
-      const { data: restShiftRows } = await supabase
-        .from('dict_item')
-        .select('id')
-        .eq('item_code', 'rest')
-        .limit(1);
-      const restShiftTypeId = restShiftRows?.[0]?.id;
-
-      const replacementEmp = await supabase
-        .from('employee')
-        .select('id, department_id')
-        .eq('id', payload.replacementEmployeeId)
-        .single();
-
-      // Check if replacement has a schedule record on that date
-      const { data: replacementSchedule } = await supabase
-        .from('schedule')
-        .select('id')
-        .eq('schedule_version_id', originalSchedule.schedule_version_id)
-        .eq('employee_id', payload.replacementEmployeeId)
-        .eq('schedule_date', originalSchedule.schedule_date)
-        .limit(1);
-
-      // 1. Assign original's shift to replacement employee (create or update)
-      if (replacementSchedule?.[0]?.id) {
-        await supabase.from('schedule').update({
-          schedule_code_dict_item_id: originalSchedule.schedule_code_dict_item_id,
-          shift_type_dict_item_id: originalSchedule.shift_type_dict_item_id,
-          planned_hours: originalSchedule.planned_hours,
-          remark: '通过调班审批替班',
-        }).eq('id', replacementSchedule[0].id);
-      } else {
-        await supabase.from('schedule').insert({
-          schedule_version_id: originalSchedule.schedule_version_id,
-          employee_id: payload.replacementEmployeeId,
-          department_id: replacementEmp.data?.department_id || originalSchedule.department_id,
-          project_id: originalSchedule.project_id,
-          schedule_date: originalSchedule.schedule_date,
-          schedule_code_dict_item_id: originalSchedule.schedule_code_dict_item_id,
-          shift_type_dict_item_id: originalSchedule.shift_type_dict_item_id,
-          planned_hours: originalSchedule.planned_hours,
-          source_type: 'manual',
-          remark: '通过调班审批替班',
-        });
-      }
-
-      // 2. Change applicant's shift to rest
-      const updateData: any = {
-        remark: '通过调班审批调休',
-      };
-      if (restCodeId) updateData.schedule_code_dict_item_id = restCodeId;
-      if (restShiftTypeId) updateData.shift_type_dict_item_id = restShiftTypeId;
-      updateData.planned_hours = 0;
-
-      await supabase.from('schedule').update(updateData).eq('id', request.original_schedule_id);
-
-      // Update the request with the replacement employee
+      // direct_change 需记录 target_employee_id
       await supabase.from('shift_change_request').update({
         target_employee_id: payload.replacementEmployeeId,
       }).eq('id', payload.shiftChangeRequestId);
     }
+
+    // --- 4. 创建新版本 ---
+    const { data: newVersionRows, error: createVersionErr } = await supabase
+      .from('schedule_version')
+      .insert({
+        project_id: oldVersion.project_id,
+        schedule_month: oldVersion.schedule_month,
+        version_no: newVersionNo,
+        generation_type: 'shift_change',
+        publish_status_dict_item_id: publishedStatusId,
+        created_by_user_account_id: payload.operatorUserAccountId || null,
+        published_at: approvedAt,
+        published_by_user_account_id: payload.operatorUserAccountId || null,
+        is_active: false, // 先不激活，最后统一设置
+        remark: versionRemark,
+      })
+      .select('id')
+      .single();
+
+    if (createVersionErr || !newVersionRows) {
+      throw toAppError(createVersionErr || new Error('创建新版本失败'), '审批调班失败');
+    }
+    const newVersionId = newVersionRows.id;
+
+    // --- 5. 批量复制原版本所有排班记录到新版本 ---
+    const { data: allSchedules, error: fetchErr } = await supabase
+      .from('schedule')
+      .select('*')
+      .eq('schedule_version_id', oldVersionId);
+
+    if (fetchErr) {
+      throw toAppError(fetchErr, '复制排班数据失败');
+    }
+
+    if (allSchedules && allSchedules.length > 0) {
+      const copiedRows = allSchedules.map((s: any) => {
+        const { id, created_at, updated_at, schedule_import_batch_id, ...rest } = s;
+        return {
+          ...rest,
+          schedule_version_id: newVersionId,
+          source_type: 'copy',
+          schedule_import_batch_id: null,
+        };
+      });
+
+      // 分批插入（每批500条）
+      const BATCH_SIZE = 500;
+      for (let i = 0; i < copiedRows.length; i += BATCH_SIZE) {
+        const batch = copiedRows.slice(i, i + BATCH_SIZE);
+        const { error: insertErr } = await supabase.from('schedule').insert(batch);
+        if (insertErr) {
+          throw toAppError(insertErr, '复制排班数据失败');
+        }
+      }
+    }
+
+    // --- 6. 在新版本中应用调班变更 ---
+    if (request.request_type === 'swap' && request.target_schedule_id) {
+      // 获取目标排班（旧版本中的）
+      const { data: targetOld } = await supabase
+        .from('schedule')
+        .select('*')
+        .eq('id', request.target_schedule_id)
+        .single();
+
+      // 在新版本中通过 employee_id + schedule_date 定位
+      await Promise.all([
+        // 申请人的排班 → 换成目标人的班次
+        supabase.from('schedule').update({
+          schedule_code_dict_item_id: targetOld.schedule_code_dict_item_id,
+          shift_type_dict_item_id: targetOld.shift_type_dict_item_id,
+          planned_hours: targetOld.planned_hours,
+          remark: `调班审批: 与${(await supabase.from('employee').select('full_name').eq('id', request.target_employee_id).single()).data?.full_name || ''}互换`,
+        })
+          .eq('schedule_version_id', newVersionId)
+          .eq('employee_id', request.applicant_employee_id)
+          .eq('schedule_date', origScheduleRow.schedule_date),
+        // 目标人的排班 → 换成申请人的班次
+        supabase.from('schedule').update({
+          schedule_code_dict_item_id: origScheduleRow.schedule_code_dict_item_id,
+          shift_type_dict_item_id: origScheduleRow.shift_type_dict_item_id,
+          planned_hours: origScheduleRow.planned_hours,
+          remark: `调班审批: 与${applicantName}互换`,
+        })
+          .eq('schedule_version_id', newVersionId)
+          .eq('employee_id', request.target_employee_id)
+          .eq('schedule_date', origScheduleRow.schedule_date),
+      ]);
+    }
+
+    if (request.request_type === 'direct_change') {
+      // 查休息编码和班别
+      const { data: restCodeRows } = await supabase.from('dict_item').select('id').eq('item_name', '休').limit(1);
+      const restCodeId = restCodeRows?.[0]?.id;
+      const { data: restShiftRows } = await supabase.from('dict_item').select('id').eq('item_code', 'rest').limit(1);
+      const restShiftTypeId = restShiftRows?.[0]?.id;
+
+      const { data: replEmpData } = await supabase.from('employee').select('id, full_name, department_id').eq('id', payload.replacementEmployeeId!).single();
+
+      // 在新版本中：替班人接班
+      const { data: replScheduleInNew } = await supabase
+        .from('schedule')
+        .select('id')
+        .eq('schedule_version_id', newVersionId)
+        .eq('employee_id', payload.replacementEmployeeId!)
+        .eq('schedule_date', origScheduleRow.schedule_date)
+        .limit(1);
+
+      if (replScheduleInNew?.[0]?.id) {
+        await supabase.from('schedule').update({
+          schedule_code_dict_item_id: origScheduleRow.schedule_code_dict_item_id,
+          shift_type_dict_item_id: origScheduleRow.shift_type_dict_item_id,
+          planned_hours: origScheduleRow.planned_hours,
+          remark: `调班审批: 替${applicantName}班`,
+        }).eq('id', replScheduleInNew[0].id);
+      } else {
+        await supabase.from('schedule').insert({
+          schedule_version_id: newVersionId,
+          employee_id: payload.replacementEmployeeId!,
+          department_id: replEmpData?.department_id || origScheduleRow.department_id,
+          project_id: origScheduleRow.project_id,
+          schedule_date: origScheduleRow.schedule_date,
+          schedule_code_dict_item_id: origScheduleRow.schedule_code_dict_item_id,
+          shift_type_dict_item_id: origScheduleRow.shift_type_dict_item_id,
+          planned_hours: origScheduleRow.planned_hours,
+          source_type: 'copy',
+          remark: `调班审批: 替${applicantName}班`,
+        });
+      }
+
+      // 在新版本中：申请人改休
+      const restUpdate: any = {
+        remark: `调班审批: 由${replEmpData?.full_name || '替班人员'}替班`,
+        planned_hours: 0,
+      };
+      if (restCodeId) restUpdate.schedule_code_dict_item_id = restCodeId;
+      if (restShiftTypeId) restUpdate.shift_type_dict_item_id = restShiftTypeId;
+
+      await supabase.from('schedule').update(restUpdate)
+        .eq('schedule_version_id', newVersionId)
+        .eq('employee_id', request.applicant_employee_id)
+        .eq('schedule_date', origScheduleRow.schedule_date);
+    }
+
+    // --- 7. 旧版本归档，新版本激活 ---
+    // 将同项目同月的所有旧版本设为 is_active=false
+    await supabase
+      .from('schedule_version')
+      .update({ is_active: false })
+      .eq('project_id', oldVersion.project_id)
+      .eq('schedule_month', oldVersion.schedule_month);
+
+    // 新版本设为激活
+    await supabase
+      .from('schedule_version')
+      .update({ is_active: true })
+      .eq('id', newVersionId);
   }
 
   // Update approval status
