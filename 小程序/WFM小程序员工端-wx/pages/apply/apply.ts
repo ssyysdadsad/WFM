@@ -159,11 +159,8 @@ Page({
           targetScheduleId: scheduleId,
         })
 
-        if (isRest) {
-          this.setData({ formError: `对方在 ${date} 的班次为「${codeName}」（休息），无法互换` })
-        } else {
-          this.setData({ formError: '' })
-        }
+        // 对方为休息班次时也允许互换
+        this.setData({ formError: '' })
       } else {
         this.setData({
           formTargetShiftLabel: '无排班',
@@ -400,9 +397,7 @@ Page({
     if (requestType === 'swap' && !this.data.formTargetDate) {
       this.setData({ formError: '请选择换回排班日期' }); return
     }
-    if (requestType === 'swap' && this.data.targetShiftIsRest) {
-      this.setData({ formError: '对方在该日期为休息状态，无法互换' }); return
-    }
+
     if (requestType === 'swap' && !this.data.formTargetShiftId) {
       this.setData({ formError: '未获取到对方班次信息，请选择换回日期' }); return
     }
