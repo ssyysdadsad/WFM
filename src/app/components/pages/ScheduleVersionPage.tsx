@@ -197,7 +197,7 @@ export function ScheduleVersionPage() {
         file,
         projectId: values.project_id,
         scheduleMonth: dayjs(values.schedule_month).startOf('month').format('YYYY-MM-DD'),
-        importMode: values.import_mode,
+        importMode: 'cover_draft',
         operatorUserAccountId: currentUser.id,
       });
       setImportResult(result);
@@ -323,7 +323,6 @@ export function ScheduleVersionPage() {
           <Button icon={<DownloadOutlined />} onClick={() => {
             importForm.setFieldsValue({
               project_id: filterProject,
-              import_mode: 'cover_draft',
             });
             setImportFileList([]);
             setImportModalOpen(true);
@@ -673,14 +672,7 @@ export function ScheduleVersionPage() {
           <Form.Item name="schedule_month" label="排班月份" rules={[{ required: true, message: '请选择月份' }]}>
             <DatePicker picker="month" style={{ width: '100%' }} />
           </Form.Item>
-          <Form.Item name="import_mode" label="导入模式" rules={[{ required: true, message: '请选择导入模式' }]}>
-            <Select
-              options={[
-                { label: '覆盖草稿版本', value: 'cover_draft' },
-                { label: '新建导入版本', value: 'new_version' },
-              ]}
-            />
-          </Form.Item>
+
           <Form.Item label="Excel 文件" required>
             <Upload
               accept=".xlsx,.xls"

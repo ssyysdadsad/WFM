@@ -282,6 +282,10 @@ export function ScheduleMatrixPage() {
 
   const filteredEmployees = useMemo(() => {
     let emps = allEmployees;
+    // 只显示在当前版本中有排班数据的员工
+    if (involvedEmpIds.size > 0) {
+      emps = emps.filter(e => involvedEmpIds.has(e.id));
+    }
     // Filter by department
     if (selectedDept) emps = emps.filter(e => e.departmentId === selectedDept);
     // Filter by search text
@@ -298,7 +302,7 @@ export function ScheduleMatrixPage() {
       });
     }
     return emps;
-  }, [allEmployees, selectedDept, searchText, empSortOrderMap]);
+  }, [allEmployees, involvedEmpIds, selectedDept, searchText, empSortOrderMap]);
 
   // matrix rows
   const matrixData = useMemo(() => {
