@@ -5,7 +5,7 @@ import { CheckOutlined, CloseOutlined, ReloadOutlined, ExpandOutlined, FilterOut
 import { getErrorMessage } from '@/app/lib/supabase/errors';
 import { useCurrentUser } from '@/app/hooks/useCurrentUser';
 import { approveShiftChange, listShiftChangeRequests, loadShiftChangeReferences, findAvailableReplacements, getMonthlyHoursImpact, type HoursImpact } from '@/app/services/shift-change.service';
-import { validateShiftChange, type ValidationResult } from '@/app/services/labor-rule.service';
+import { validateShiftChange, type ValidationResult, type ScheduleViolation } from '@/app/services/labor-rule.service';
 import type { ApprovalStatusOption, ShiftChangeRequestRecord, AvailableReplacement } from '@/app/types/shift-change';
 
 type FilterTab = 'all' | 'pending' | 'approved' | 'rejected';
@@ -30,6 +30,8 @@ export function ShiftChangePage() {
   // Hours impact preview
   const [hoursImpact, setHoursImpact] = useState<{ applicant: HoursImpact; replacement: HoursImpact } | null>(null);
   const [loadingImpact, setLoadingImpact] = useState(false);
+  // 用工规则预检查结果
+  const [laborWarningsMap, setLaborWarningsMap] = useState<Record<string, { hard: ScheduleViolation[]; soft: ScheduleViolation[] }>>({}); 
 
   useEffect(() => { loadData(); loadRefs(); }, []);
 
@@ -47,11 +49,63 @@ export function ShiftChangePage() {
     try {
       const rows = await listShiftChangeRequests();
       setData(rows);
+      // 异步预检查待审批记录的用工规则
+      runLaborRulePreCheck(rows);
     } catch (error) {
       message.error(getErrorMessage(error, '加载调班申请失败'));
     } finally {
       setLoading(false);
     }
+  }
+
+  /** 对所有待审批的记录运行用工规则校验，结果存入 map 供列表展示 */
+  async function runLaborRulePreCheck(rows: ShiftChangeRequestRecord[]) {
+    const pending = rows.filter(
+      r => r.statusCode?.includes('pending') && !r.approvedAt && r.originalScheduleDate && r.scheduleVersionId,
+    );
+    if (pending.length === 0) return;
+
+    const map: Record<string, { hard: ScheduleViolation[]; soft: ScheduleViolation[] }> = {};
+    await Promise.all(
+      pending.map(async (record) => {
+        try {
+          const shiftHours = record.originalPlannedHours ?? 8;
+          // 校验申请人
+          const applicantResult = await validateShiftChange({
+            employeeId: record.applicantEmployeeId,
+            employeeName: record.applicantName || '申请人',
+            changeDate: record.originalScheduleDate!,
+            newPlannedHours: 0,
+            newIsWorkDay: false,
+            scheduleVersionId: record.scheduleVersionId!,
+            projectId: record.projectId || undefined,
+            departmentId: record.applicantDepartmentId || undefined,
+            laborRelationDictItemId: record.applicantLaborRelationDictItemId || undefined,
+          });
+          // 校验互换对象（swap）或替班人（direct_change 尚未选人，跳过）
+          let targetResult: ValidationResult | null = null;
+          if (record.requestType === 'swap' && record.targetEmployeeId) {
+            targetResult = await validateShiftChange({
+              employeeId: record.targetEmployeeId,
+              employeeName: record.targetEmployeeName || '互换对象',
+              changeDate: record.originalScheduleDate!,
+              newPlannedHours: shiftHours,
+              newIsWorkDay: true,
+              scheduleVersionId: record.scheduleVersionId!,
+              projectId: record.projectId || undefined,
+              departmentId: record.applicantDepartmentId || undefined,
+              laborRelationDictItemId: record.applicantLaborRelationDictItemId || undefined,
+            });
+          }
+          const hard = [...applicantResult.hardViolations, ...(targetResult?.hardViolations || [])];
+          const soft = [...applicantResult.softViolations, ...(targetResult?.softViolations || [])];
+          if (hard.length > 0 || soft.length > 0) {
+            map[record.id] = { hard, soft };
+          }
+        } catch { /* ignore individual failures */ }
+      }),
+    );
+    setLaborWarningsMap(map);
   }
 
   // When opening detail for direct_change pending request, load available replacements
@@ -473,6 +527,36 @@ export function ShiftChangePage() {
                   <div style={{ fontSize: 12, color: '#999' }}>申请调休</div>
                   {record.targetCodeName && <Tag color="green">{record.targetCodeName}</Tag>}
                   {!record.targetCodeName && <Tag>需安排替班</Tag>}
+                </div>
+              );
+            },
+          },
+          {
+            title: '用工规则', width: 180,
+            render: (_: unknown, record: ShiftChangeRequestRecord) => {
+              if (!record.statusCode?.includes('pending') || record.approvedAt) {
+                return <Typography.Text type="secondary" style={{ fontSize: 12 }}>-</Typography.Text>;
+              }
+              const warnings = laborWarningsMap[record.id];
+              if (!warnings) {
+                return <Tag color="success" style={{ fontSize: 11 }}>✓ 无警告</Tag>;
+              }
+              return (
+                <div>
+                  {warnings.hard.map((w, i) => (
+                    <Tooltip key={`h${i}`} title={`[强制] ${w.ruleName}: ${w.message}`}>
+                      <Tag color="error" style={{ fontSize: 11, marginBottom: 2, cursor: 'pointer' }}>
+                        ⛔ {w.message.length > 14 ? w.message.substring(0, 14) + '...' : w.message}
+                      </Tag>
+                    </Tooltip>
+                  ))}
+                  {warnings.soft.map((w, i) => (
+                    <Tooltip key={`s${i}`} title={`[建议] ${w.ruleName}: ${w.message}`}>
+                      <Tag color="warning" style={{ fontSize: 11, marginBottom: 2, cursor: 'pointer' }}>
+                        ⚠ {w.message.length > 14 ? w.message.substring(0, 14) + '...' : w.message}
+                      </Tag>
+                    </Tooltip>
+                  ))}
                 </div>
               );
             },
