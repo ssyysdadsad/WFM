@@ -271,21 +271,19 @@ export async function approveShiftChange(payload: ShiftChangeApprovePayload) {
     return data;
   }
 
-  // Extract real error from Edge Function response
-  try {
-    const ctx = (error as any).context;
-    if (ctx) {
-      const body = typeof ctx.json === 'function' ? await ctx.json() : (typeof ctx === 'object' ? ctx : null);
-      if (body?.success === false && body?.message) {
-        // Skip auth errors - let them fall through to the fallback
-        const isAuthError = /invalid claim|missing sub|unauthorized/i.test(body.message);
-        if (!isAuthError) {
+  // Extract real error from Edge Function response (skip in mock mode to ensure fallback)
+  if (authMode !== 'mock') {
+    try {
+      const ctx = (error as any).context;
+      if (ctx) {
+        const body = typeof ctx.json === 'function' ? await ctx.json() : (typeof ctx === 'object' ? ctx : null);
+        if (body?.success === false && body?.message) {
           throw new AppError(body.message, body.error_code ?? 'FUNCTION_ERROR');
         }
       }
+    } catch (extractError) {
+      if (extractError instanceof AppError) throw extractError;
     }
-  } catch (extractError) {
-    if (extractError instanceof AppError) throw extractError;
   }
 
   const isFallbackAllowed =

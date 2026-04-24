@@ -1051,7 +1051,7 @@ export function ScheduleMatrixPage() {
           value={selectedVersion}
           onChange={handleVersionChange}
           options={versions.map(v => ({
-            label: `v${v.versionNo} · ${v.generationType === 'manual' ? '手工' : v.generationType === 'template' ? '模板' : v.generationType}`,
+            label: `v${v.versionNo} · ${v.generationType === 'manual' ? '手工' : v.generationType === 'template' ? '模板' : v.generationType === 'shift_change' ? '调班' : v.generationType}`,
             value: v.id,
           }))}
           disabled={!selectedProject}
