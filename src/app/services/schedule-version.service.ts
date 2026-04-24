@@ -205,7 +205,17 @@ export async function publishScheduleVersion(payload: SchedulePublishPayload) {
 }
 
 export async function deleteScheduleVersion(versionId: string) {
-  // First delete all schedule records belonging to this version
+  // First delete import batch records
+  const { error: deleteBatchError } = await supabase
+    .from('schedule_import_batch')
+    .delete()
+    .eq('schedule_version_id', versionId);
+
+  if (deleteBatchError) {
+    throw toAppError(deleteBatchError, '删除导入记录失败');
+  }
+
+  // Then delete all schedule records belonging to this version
   const { error: deleteRecordsError } = await supabase
     .from('schedule')
     .delete()
