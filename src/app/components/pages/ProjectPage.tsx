@@ -3,6 +3,7 @@ import { DatePicker } from 'antd';
 import dayjs from 'dayjs';
 import { CrudPage } from '../CrudPage';
 import { listCrudRows, loadCrudForeignOptions, saveCrudRow } from '@/app/services/master-data.service';
+import { supabase } from '../supabase';
 
 export function ProjectPage() {
   const [filterMonth, setFilterMonth] = useState<dayjs.Dayjs | null>(null);
@@ -47,6 +48,10 @@ export function ProjectPage() {
             pageSize: options.pageSize,
           }),
         save: (values, editingId) => saveCrudRow('project', values, editingId),
+        delete: async (id: string) => {
+          const { error } = await supabase.rpc('cascade_delete_project', { p_project_id: id });
+          if (error) throw error;
+        },
         loadForeignData: loadCrudForeignOptions,
       }}
       columns={[
