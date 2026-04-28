@@ -1,6 +1,6 @@
 // pages/apply/apply.ts
 import { requireAuth, getEmployee } from '../../utils/auth'
-import { query, insert } from '../../utils/supabase'
+import { query, insert, update } from '../../utils/supabase'
 
 Page({
   data: {
@@ -8,32 +8,41 @@ Page({
     loading: false,
     submitting: false,
     requests: [] as any[],
-    // Form fields
-    requestType: 'swap' as 'direct_change' | 'swap',
+    // 三种类型: leave | direct_swap | swap_with_payback
+    requestType: 'direct_swap' as 'leave' | 'direct_swap' | 'swap_with_payback',
     employee: { name: '', department: '' } as any,
+    // 申请人日期/班次
     formOrigDate: '',
     myShiftCode: '',
+    myShiftCodeId: '',
     myScheduleId: '',
-    formTargetDate: '',
-    formTargetShiftLabel: '',
-    formTargetShiftId: '',
-    targetShiftIsRest: false,
     myShiftIsRest: false,
-    targetScheduleId: '',
+    // 对方员工
+    targetEmployeeOptions: [] as any[],
+    targetEmpPickerIndex: 0,
     formTargetEmpId: '',
     formTargetEmpName: '',
+    targetScheduleId: '',
+    targetShiftCode: '',
+    targetShiftCodeId: '',
+    // direct_swap: 对方日期（可跨日）
+    formTargetDate: '',
+    // swap_with_payback: 还班日
+    paybackDateOptions: [] as any[],
+    paybackDateLabels: [] as string[],
+    selectedPaybackIndex: 0,
+    selectedPaybackDate: '',
+    selectedPaybackScheduleId: '',
+    // 公共
     formReason: '',
     formError: '',
     formSuccess: '',
-    // Picker options
-    shiftOptions: [] as any[],
-    shiftPickerIndex: 0,
-    targetEmployeeOptions: [] as any[],
-    targetEmpPickerIndex: 0,
+    // 待我确认
+    pendingPeerRequests: [] as any[],
+    pendingPeerLoading: false,
     // Internal
     _pendingStatusId: '',
     _activeVersionIds: [] as string[],
-
     // === Urgent shift data ===
     urgentLoading: false,
     urgentShifts: [] as any[],
@@ -50,423 +59,327 @@ Page({
     if (!requireAuth()) return
     const emp = getEmployee()
     if (emp) {
-      this.setData({
-        employee: { name: emp.name, no: emp.no, department: emp.department, id: emp.id },
-      })
+      this.setData({ employee: { name: emp.name, no: emp.no, department: emp.department, id: emp.id } })
     }
     this.loadRequests()
     this.loadShiftOptions()
-    // 先加载激活版本ID，再加载紧急班次（需用到版本过滤）
-    this.loadActiveVersionIds().then(() => {
-      this.loadUrgentShifts()
-    })
+    this.loadActiveVersionIds().then(() => { this.loadUrgentShifts() })
   },
 
   switchTab(e: any) {
     const tab = e.currentTarget.dataset.tab
     this.setData({ activeTab: tab, formError: '', formSuccess: '' })
-    if (tab === 'urgent') {
-      this.loadUrgentShifts()
-    }
+    if (tab === 'urgent') this.loadUrgentShifts()
+    else if (tab === 'peer') this.loadPendingPeerRequests()
   },
 
   switchRequestType(e: any) {
+    const type = e.currentTarget.dataset.type
     this.setData({
-      requestType: e.currentTarget.dataset.type,
-      formError: '',
-      formSuccess: '',
-      formTargetEmpId: '',
-      formTargetEmpName: '',
+      requestType: type, formError: '', formSuccess: '',
+      formTargetEmpId: '', formTargetEmpName: '',
+      targetScheduleId: '', targetShiftCode: '', targetShiftCodeId: '',
+      formTargetDate: '',
+      paybackDateOptions: [], paybackDateLabels: [], selectedPaybackDate: '', selectedPaybackScheduleId: '',
+      targetEmployeeOptions: [],
     })
-  },
-
-  // ===== Form handlers =====
-  async onOrigDateChange(e: any) {
-    const date = e.detail.value
-    this.setData({ formOrigDate: date, myShiftCode: '', myScheduleId: '', myShiftIsRest: false, formError: '' })
-    // Auto-detect my shift on this date
-    await this.detectMyShift(date)
-    // For swap mode, load available employees for this date
-    if (this.data.requestType === 'swap') {
-      await this.loadTargetEmployees(date)
+    if (this.data.formOrigDate && !this.data.myShiftIsRest) {
+      this.loadTargetEmployees(this.data.formOrigDate, type)
     }
   },
+
+  async onOrigDateChange(e: any) {
+    const date = e.detail.value
+    this.setData({
+      formOrigDate: date, myShiftCode: '', myShiftCodeId: '', myScheduleId: '',
+      myShiftIsRest: false, formError: '',
+      formTargetEmpId: '', formTargetEmpName: '', targetScheduleId: '',
+      targetShiftCode: '', targetShiftCodeId: '', formTargetDate: '',
+      paybackDateOptions: [], paybackDateLabels: [], selectedPaybackDate: '', selectedPaybackScheduleId: '',
+      targetEmployeeOptions: [],
+    })
+    await this.detectMyShift(date)
+    if (!this.data.myShiftIsRest) {
+      await this.loadTargetEmployees(date, this.data.requestType)
+    }
+  },
+
+  onReasonInput(e: any) { this.setData({ formReason: e.detail.value }) },
 
   async onTargetDateChange(e: any) {
     const date = e.detail.value
-    this.setData({ formTargetDate: date, formTargetShiftLabel: '', formTargetShiftId: '', targetShiftIsRest: false })
-    // Auto-detect target employee's shift on this date (swap mode)
-    if (this.data.requestType === 'swap' && this.data.formTargetEmpId) {
-      await this.detectTargetShift(this.data.formTargetEmpId, date)
-    }
-  },
-  onReasonInput(e: any) { this.setData({ formReason: e.detail.value }) },
-
-  onShiftPickerChange(e: any) {
-    const idx = Number(e.detail.value)
-    const opt = this.data.shiftOptions[idx]
-    if (opt) {
-      this.setData({
-        shiftPickerIndex: idx,
-        formTargetShiftLabel: opt.label,
-        formTargetShiftId: opt.id,
-      })
-    }
+    this.setData({ formTargetDate: date, formTargetEmpId: '', formTargetEmpName: '', targetScheduleId: '', targetShiftCode: '', targetShiftCodeId: '' })
+    await this.loadTargetEmployees(date, 'direct_swap')
   },
 
   async onTargetEmpChange(e: any) {
     const idx = Number(e.detail.value)
     const opt = this.data.targetEmployeeOptions[idx]
-    if (opt) {
-      this.setData({
-        targetEmpPickerIndex: idx,
-        formTargetEmpId: opt.id,
-        formTargetEmpName: opt.label,
-        formTargetShiftLabel: '',
-        formTargetShiftId: '',
-        targetShiftIsRest: false,
-      })
-      // If target date is already set, auto-detect shift
-      if (this.data.formTargetDate) {
-        await this.detectTargetShift(opt.id, this.data.formTargetDate)
-      }
+    if (!opt) return
+    this.setData({
+      targetEmpPickerIndex: idx,
+      formTargetEmpId: opt.id,
+      formTargetEmpName: opt.name,
+      targetScheduleId: opt.scheduleId || '',
+      targetShiftCode: opt.shiftCode || '',
+      targetShiftCodeId: opt.shiftCodeId || '',
+      paybackDateOptions: [], paybackDateLabels: [], selectedPaybackDate: '', selectedPaybackScheduleId: '',
+    })
+    if (this.data.requestType === 'swap_with_payback') {
+      await this.loadPaybackDates(opt.id)
     }
   },
 
-  /** 自动检测对方在指定日期的班次 */
-  async detectTargetShift(empId: string, date: string) {
-    try {
-      const versionIds = this.data._activeVersionIds
-      let vf = ''
-      if (versionIds.length > 0) vf = `&schedule_version_id=in.(${versionIds.join(',')})`
+  onPaybackDateChange(e: any) {
+    const idx = Number(e.detail.value)
+    const opt = this.data.paybackDateOptions[idx]
+    if (opt) {
+      this.setData({ selectedPaybackIndex: idx, selectedPaybackDate: opt.date, selectedPaybackScheduleId: opt.targetScheduleId })
+    }
+  },
 
-      const rows: any[] = await query('schedule',
-        `employee_id=eq.${empId}&schedule_date=eq.${date}${vf}&select=id,schedule_code_dict_item_id&limit=1`
-      )
+  async detectMyShift(date: string) {
+    try {
+      const emp = getEmployee(); if (!emp) return
+      const vf = this.data._activeVersionIds.length > 0 ? `&schedule_version_id=in.(${this.data._activeVersionIds.join(',')})` : ''
+      const rows: any[] = await query('schedule', `employee_id=eq.${emp.id}&schedule_date=eq.${date}${vf}&select=id,schedule_code_dict_item_id&limit=1`)
       if (rows.length > 0) {
-        const scheduleId = rows[0].id
         const codeId = rows[0].schedule_code_dict_item_id
-        const codes: any[] = await query('dict_item', `id=eq.${codeId}&select=id,item_name,extra_config&limit=1`)
+        const codes: any[] = await query('dict_item', `id=eq.${codeId}&select=item_name,extra_config&limit=1`)
         const codeItem = codes?.[0]
         const codeName = codeItem?.item_name || '?'
-        const category = codeItem?.extra_config?.category || 'work'
-        const isRest = category === 'rest' || category === 'leave'
-
-        this.setData({
-          formTargetShiftLabel: codeName,
-          formTargetShiftId: codeId,
-          targetShiftIsRest: isRest,
-          targetScheduleId: scheduleId,
-        })
-
-        // 对方为休息班次时也允许互换
-        this.setData({ formError: '' })
+        const isRest = ['rest', 'leave'].includes(codeItem?.extra_config?.category)
+        this.setData({ myShiftCode: codeName, myShiftCodeId: codeId, myScheduleId: rows[0].id, myShiftIsRest: isRest })
+        if (isRest) this.setData({ formError: `您在 ${date} 已是休息，无需申请调班` })
+        else this.setData({ formError: '' })
       } else {
-        this.setData({
-          formTargetShiftLabel: '无排班',
-          formTargetShiftId: '',
-          targetShiftIsRest: true,
-          targetScheduleId: '',
-          formError: `对方在 ${date} 无排班记录，无法互换`,
-        })
+        this.setData({ myShiftCode: '无排班', myShiftCodeId: '', myScheduleId: '', myShiftIsRest: false, formError: `您在 ${date} 没有排班，无法申请` })
       }
-    } catch (e) {
-      console.error('Detect target shift error:', e)
-    }
+    } catch (e) { console.error('detectMyShift', e) }
   },
 
-  // ===== Data loaders =====
   async loadActiveVersionIds() {
     try {
       const emp = getEmployee()
-      // 查员工所属项目
-      let versionQuery = 'is_active=eq.true&published_at=not.is.null&select=id'
+      let q = 'is_active=eq.true&published_at=not.is.null&select=id'
       if (emp?.id) {
-        const peRows: any[] = await query('project_employee',
-          `employee_id=eq.${emp.id}&is_active=eq.true&select=project_id`
-        )
-        const myProjectIds = peRows.map(r => r.project_id)
-        if (myProjectIds.length > 0) {
-          versionQuery += `&project_id=in.(${myProjectIds.join(',')})`
-        }
+        const pe: any[] = await query('project_employee', `employee_id=eq.${emp.id}&is_active=eq.true&select=project_id`)
+        const pids = pe.map(r => r.project_id)
+        if (pids.length > 0) q += `&project_id=in.(${pids.join(',')})`
       }
-      const versions: any[] = await query('schedule_version', versionQuery)
-      this.setData({ _activeVersionIds: versions.map(v => v.id) })
+      const v: any[] = await query('schedule_version', q)
+      this.setData({ _activeVersionIds: v.map(x => x.id) })
     } catch (e) { /* ignore */ }
   },
 
   async loadShiftOptions() {
     try {
       const dtList: any[] = await query('dict_type', 'select=id,type_code')
-      const schedTypeId = dtList.find(t => t.type_code === 'schedule_code' || t.type_code === 'shift_code')?.id
-      if (!schedTypeId) return
-
-      const codes: any[] = await query('dict_item',
-        `dict_type_id=eq.${schedTypeId}&is_enabled=eq.true&select=id,item_code,item_name&order=sort_order`
-      )
-      const shiftOptions = codes.map(c => ({
-        id: c.id,
-        code: c.item_code,
-        label: c.item_name || c.item_code,
-      }))
-      this.setData({ shiftOptions })
-
-      // Also get pending status ID
       const approvalTypeId = dtList.find(t => t.type_code === 'approval_status')?.id
       if (approvalTypeId) {
-        const items: any[] = await query('dict_item',
-          `dict_type_id=eq.${approvalTypeId}&item_code=eq.pending&select=id&limit=1`
-        )
+        const items: any[] = await query('dict_item', `dict_type_id=eq.${approvalTypeId}&item_code=eq.pending&select=id&limit=1`)
         if (items?.[0]) this.setData({ _pendingStatusId: items[0].id })
       }
-    } catch (e) { console.error('Load shift options error:', e) }
+    } catch (e) { console.error('loadShiftOptions', e) }
   },
 
-  async detectMyShift(date: string) {
+  async loadTargetEmployees(date: string, mode: string) {
+    if (mode === 'leave') { this.setData({ targetEmployeeOptions: [] }); return }
     try {
-      const emp = getEmployee()
-      if (!emp) return
-      const versionIds = this.data._activeVersionIds
-      let vf = ''
-      if (versionIds.length > 0) vf = `&schedule_version_id=in.(${versionIds.join(',')})`
-
-      const rows: any[] = await query('schedule',
-        `employee_id=eq.${emp.id}&schedule_date=eq.${date}${vf}&select=id,schedule_code_dict_item_id&limit=1`
-      )
-      if (rows.length > 0) {
-        const codeId = rows[0].schedule_code_dict_item_id
-        const codes: any[] = await query('dict_item', `id=eq.${codeId}&select=item_name,extra_config&limit=1`)
-        const codeItem = codes?.[0]
-        const codeName = codeItem?.item_name || '?'
-        const category = codeItem?.extra_config?.category || 'work'
-        const isRest = category === 'rest' || category === 'leave'
-
-        this.setData({
-          myShiftCode: codeName,
-          myScheduleId: rows[0].id,
-          myShiftIsRest: isRest,
-        })
-
-        // 已经是休息的员工不需要申请调班
-        if (isRest) {
-          this.setData({ formError: `您在 ${date} 的班次为「${codeName}」（休息），无需申请调班` })
-        } else {
-          this.setData({ formError: '' })
-        }
-      } else {
-        this.setData({ myShiftCode: '无排班', myScheduleId: '', myShiftIsRest: false })
-      }
-    } catch (e) { console.error('Detect shift error:', e) }
-  },
-
-  async loadTargetEmployees(date: string) {
-    try {
-      const emp = getEmployee()
-      if (!emp) return
-      const versionIds = this.data._activeVersionIds
-      let vf = ''
-      if (versionIds.length > 0) vf = `&schedule_version_id=in.(${versionIds.join(',')})`
-
-      // Find employees who are on rest/leave on this date (same department)
-      const allScheds: any[] = await query('schedule',
-        `schedule_date=eq.${date}${vf}&select=employee_id,schedule_code_dict_item_id`
-      )
-
-      // Get rest code dict_item ids
+      const emp = getEmployee(); if (!emp) return
+      const vf = this.data._activeVersionIds.length > 0 ? `&schedule_version_id=in.(${this.data._activeVersionIds.join(',')})` : ''
+      const pe: any[] = await query('project_employee', `employee_id=eq.${emp.id}&is_active=eq.true&select=project_id`)
+      const pids = pe.map(r => r.project_id)
+      if (pids.length === 0) { this.setData({ targetEmployeeOptions: [] }); return }
+      const peers: any[] = await query('project_employee', `project_id=in.(${pids.join(',')})&is_active=eq.true&select=employee_id`)
+      const peerIds = [...new Set(peers.map(r => r.employee_id).filter((id: string) => id !== emp.id))]
+      if (peerIds.length === 0) { this.setData({ targetEmployeeOptions: [] }); return }
+      const scheds: any[] = await query('schedule', `schedule_date=eq.${date}${vf}&employee_id=in.(${peerIds.join(',')})&select=id,employee_id,schedule_code_dict_item_id`)
       const dtList: any[] = await query('dict_type', 'select=id,type_code')
       const schedTypeId = dtList.find(t => t.type_code === 'schedule_code' || t.type_code === 'shift_code')?.id
       if (!schedTypeId) return
-
-      const allCodes: any[] = await query('dict_item',
-        `dict_type_id=eq.${schedTypeId}&is_enabled=eq.true&select=id,item_name,extra_config`
-      )
-      const restCodeIds = new Set(allCodes.filter(c => {
-        const cat = c.extra_config?.category
-        return cat === 'rest' || cat === 'leave'
-      }).map(c => c.id))
-
-      // Filter employees who have rest on this date
-      const restEmpIds = allScheds
-        .filter(s => restCodeIds.has(s.schedule_code_dict_item_id) && s.employee_id !== emp.id)
-        .map(s => s.employee_id)
-
-      if (restEmpIds.length === 0) {
-        this.setData({ targetEmployeeOptions: [] })
-        return
+      const allCodes: any[] = await query('dict_item', `dict_type_id=eq.${schedTypeId}&is_enabled=eq.true&select=id,item_name,extra_config`)
+      const restIds = new Set(allCodes.filter(c => ['rest', 'leave'].includes(c.extra_config?.category)).map(c => c.id))
+      const codeNames: Record<string, string> = {}
+      allCodes.forEach(c => { codeNames[c.id] = c.item_name || '?' })
+      const schedMap = new Map<string, any>()
+      scheds.forEach(s => schedMap.set(s.employee_id, s))
+      let filteredIds: string[] = []
+      if (mode === 'direct_swap') {
+        filteredIds = peerIds.filter((id: string) => {
+          const s = schedMap.get(id)
+          return s && !restIds.has(s.schedule_code_dict_item_id) && s.schedule_code_dict_item_id !== this.data.myShiftCodeId
+        })
+      } else {
+        filteredIds = peerIds.filter((id: string) => { const s = schedMap.get(id); return !s || restIds.has(s.schedule_code_dict_item_id) })
       }
-
-      const uniqueIds = [...new Set(restEmpIds)]
-      const employees: any[] = await query('employee',
-        `id=in.(${uniqueIds.join(',')})`+`&select=id,full_name,employee_no`
-      )
-
-      const targetEmployeeOptions = employees.map(e => ({
-        id: e.id,
-        label: `${e.full_name} (${e.employee_no})`,
-      }))
-      this.setData({ targetEmployeeOptions })
-    } catch (e) {
-      console.error('Load target employees error:', e)
-      this.setData({ targetEmployeeOptions: [] })
-    }
+      if (filteredIds.length === 0) { this.setData({ targetEmployeeOptions: [] }); return }
+      const emps: any[] = await query('employee', `id=in.(${filteredIds.join(',')})&select=id,full_name,employee_no`)
+      const opts = emps.map(e => {
+        const s = schedMap.get(e.id)
+        const code = s ? (codeNames[s.schedule_code_dict_item_id] || '') : '休'
+        return { id: e.id, name: e.full_name, label: `${e.full_name}${e.employee_no ? '(' + e.employee_no + ')' : ''} [${code}]`, scheduleId: s?.id || '', shiftCode: code, shiftCodeId: s?.schedule_code_dict_item_id || '' }
+      })
+      this.setData({ targetEmployeeOptions: opts })
+    } catch (e) { console.error('loadTargetEmployees', e); this.setData({ targetEmployeeOptions: [] }) }
   },
 
-  // ===== Load request list =====
+  async loadPaybackDates(targetEmpId: string) {
+    try {
+      const emp = getEmployee(); if (!emp) return
+      const date = this.data.formOrigDate
+      const vids = this.data._activeVersionIds
+      if (vids.length === 0) return
+      const d = new Date(date)
+      const monthEnd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()}`
+      const scheds: any[] = await query('schedule', `schedule_version_id=in.(${vids.join(',')})&schedule_date=gte.${date}&schedule_date=lte.${monthEnd}&employee_id=in.(${emp.id},${targetEmpId})&select=id,employee_id,schedule_date,schedule_code_dict_item_id`)
+      const dtList: any[] = await query('dict_type', 'select=id,type_code')
+      const schedTypeId = dtList.find(t => t.type_code === 'schedule_code' || t.type_code === 'shift_code')?.id
+      if (!schedTypeId) return
+      const allCodes: any[] = await query('dict_item', `dict_type_id=eq.${schedTypeId}&is_enabled=eq.true&select=id,item_name,extra_config`)
+      const restIds = new Set(allCodes.filter(c => ['rest', 'leave'].includes(c.extra_config?.category)).map(c => c.id))
+      const codeNames: Record<string, string> = {}; allCodes.forEach(c => { codeNames[c.id] = c.item_name || '?' })
+      const myMap = new Map<string, any>(); const tgtMap = new Map<string, any>()
+      scheds.forEach(s => {
+        const isRest = !s.schedule_code_dict_item_id || restIds.has(s.schedule_code_dict_item_id)
+        if (s.employee_id === emp.id) myMap.set(s.schedule_date, { isRest })
+        else tgtMap.set(s.schedule_date, { isRest, id: s.id, codeId: s.schedule_code_dict_item_id })
+      })
+      const opts: any[] = []; const labels: string[] = []
+      const cur = new Date(date); cur.setDate(cur.getDate() + 1); const end = new Date(monthEnd)
+      while (cur <= end) {
+        const ds = cur.toISOString().split('T')[0]
+        const myIsRest = myMap.get(ds)?.isRest ?? true
+        const tgt = tgtMap.get(ds)
+        if (myIsRest && tgt && !tgt.isRest) {
+          const code = codeNames[tgt.codeId] || '?'
+          opts.push({ date: ds, targetCode: code, targetScheduleId: tgt.id })
+          labels.push(`${ds}（我休，对方上${code}）`)
+        }
+        cur.setDate(cur.getDate() + 1)
+      }
+      this.setData({ paybackDateOptions: opts, paybackDateLabels: labels })
+      if (opts.length === 0) this.setData({ formError: '本月内无合适还班日，建议改为申请请假' })
+      else this.setData({ formError: '' })
+    } catch (e) { console.error('loadPaybackDates', e) }
+  },
+
   async loadRequests() {
     this.setData({ loading: true })
     try {
-      const emp = getEmployee()
-      if (!emp) return
-
-      const rows: any[] = await query('shift_change_request',
-        `applicant_employee_id=eq.${emp.id}&select=*&order=created_at.desc`
-      )
-
+      const emp = getEmployee(); if (!emp) return
+      const rows: any[] = await query('shift_change_request', `applicant_employee_id=eq.${emp.id}&select=*&order=created_at.desc`)
       const statusIds = [...new Set(rows.map(r => r.approval_status_dict_item_id).filter(Boolean))]
       let statusMap: Record<string, string> = {}
       if (statusIds.length > 0) {
-        const items: any[] = await query('dict_item', `id=in.(${statusIds.join(',')})`+`&select=id,item_code,item_name`)
+        const items: any[] = await query('dict_item', `id=in.(${statusIds.join(',')})&select=id,item_code`)
         items.forEach(i => { statusMap[i.id] = i.item_code })
       }
-
-      const schedIds = [...new Set([
-        ...rows.map(r => r.original_schedule_id),
-        ...rows.map(r => r.target_schedule_id),
-      ].filter(Boolean))]
-
+      const schedIds = [...new Set([...rows.map(r => r.original_schedule_id), ...rows.map(r => r.target_schedule_id)].filter(Boolean))]
       let schedMap: Record<string, any> = {}
       if (schedIds.length > 0) {
-        const scheds: any[] = await query('schedule', `id=in.(${schedIds.join(',')})`+`&select=id,schedule_date,schedule_code_dict_item_id`)
-        const codeIds2 = [...new Set(scheds.map(s => s.schedule_code_dict_item_id).filter(Boolean))]
-        let codeNameMap: Record<string, string> = {}
-        if (codeIds2.length > 0) {
-          const codes: any[] = await query('dict_item', `id=in.(${codeIds2.join(',')})`+`&select=id,item_code,item_name`)
-          codes.forEach(c => { codeNameMap[c.id] = c.item_name || c.item_code })
-        }
-        scheds.forEach(s => {
-          schedMap[s.id] = { date: s.schedule_date, code: codeNameMap[s.schedule_code_dict_item_id] || '?' }
-        })
+        const scheds: any[] = await query('schedule', `id=in.(${schedIds.join(',')})&select=id,schedule_date,schedule_code_dict_item_id`)
+        const codeIds = [...new Set(scheds.map(s => s.schedule_code_dict_item_id).filter(Boolean))]
+        let codeNames: Record<string, string> = {}
+        if (codeIds.length > 0) { const c: any[] = await query('dict_item', `id=in.(${codeIds.join(',')})&select=id,item_name`); c.forEach(x => { codeNames[x.id] = x.item_name || '?' }) }
+        scheds.forEach(s => { schedMap[s.id] = { date: s.schedule_date, code: codeNames[s.schedule_code_dict_item_id] || '?' } })
       }
-
-      // Get target employee names
-      const targetEmpIds = [...new Set(rows.map(r => r.target_employee_id).filter(Boolean))]
-      let empNameMap: Record<string, string> = {}
-      if (targetEmpIds.length > 0) {
-        const emps: any[] = await query('employee', `id=in.(${targetEmpIds.join(',')})`+`&select=id,full_name`)
-        emps.forEach(e => { empNameMap[e.id] = e.full_name })
-      }
-
-      const statusStyles: Record<string, { label: string; bg: string; color: string }> = {
-        pending: { label: '待审批', bg: '#FFF8E1', color: '#F9A825' },
-        approved: { label: '已通过', bg: '#E4FAF5', color: '#12B8A0' },
-        rejected: { label: '已拒绝', bg: '#FFF0EE', color: '#D96B5A' },
-      }
-
+      const empIds = [...new Set(rows.map(r => r.target_employee_id).filter(Boolean))]
+      let empNames: Record<string, string> = {}
+      if (empIds.length > 0) { const e: any[] = await query('employee', `id=in.(${empIds.join(',')})&select=id,full_name`); e.forEach(x => { empNames[x.id] = x.full_name }) }
+      const ss: Record<string, any> = { pending: { label: '待审批', bg: '#FFF8E1', color: '#F9A825' }, approved: { label: '已通过', bg: '#E4FAF5', color: '#12B8A0' }, rejected: { label: '已拒绝', bg: '#FFF0EE', color: '#D96B5A' } }
+      const tl: Record<string, string> = { leave: '请假', direct_swap: '直接换班', swap_with_payback: '互换调班', swap: '换班', take_off: '请假' }
+      const pl: Record<string, string> = { pending_peer: '待对方确认', peer_approved: '对方已同意', peer_rejected: '对方已拒绝', not_required: '' }
       const requests = rows.map(r => {
-        const statusCode = statusMap[r.approval_status_dict_item_id] || 'pending'
-        const style = statusStyles[statusCode] || statusStyles.pending
-        const orig = schedMap[r.original_schedule_id]
-        const target = schedMap[r.target_schedule_id]
-
-        return {
-          id: r.id,
-          typeLabel: r.request_type === 'swap' ? '互换' : '变更',
-          statusLabel: style.label,
-          statusBg: style.bg,
-          statusColor: style.color,
-          originalDate: orig?.date || '',
-          originalShift: orig?.code || '',
-          targetDate: target?.date || r.target_date || '',
-          targetShift: target?.code || '',
-          targetEmployeeName: empNameMap[r.target_employee_id] || '',
-          reason: r.reason || '',
-          createdAt: r.created_at ? r.created_at.split('T')[0] : '',
-        }
+        const style = ss[statusMap[r.approval_status_dict_item_id]] || ss.pending
+        const orig = schedMap[r.original_schedule_id]; const target = schedMap[r.target_schedule_id]
+        return { id: r.id, typeLabel: tl[r.request_type] || r.request_type, statusLabel: style.label, statusBg: style.bg, statusColor: style.color, originalDate: orig?.date || '', originalShift: orig?.code || '', targetDate: target?.date || r.target_date || '', targetShift: target?.code || '', targetEmployeeName: empNames[r.target_employee_id] || '', paybackDate: r.payback_date || '', peerStatusLabel: pl[r.peer_status || 'not_required'] || '', reason: r.reason || '', createdAt: r.created_at ? r.created_at.split('T')[0] : '' }
       })
-
       this.setData({ requests, loading: false })
-    } catch (err) {
-      console.error('Load requests error:', err)
-      this.setData({ loading: false })
-    }
+    } catch (err) { console.error('loadRequests', err); this.setData({ loading: false }) }
   },
 
-  // ===== Submit =====
   async handleSubmit() {
     const { requestType, formOrigDate, formReason, myScheduleId, _pendingStatusId } = this.data
-    if (!formOrigDate) { this.setData({ formError: '请选择原排班日期' }); return }
+    if (!formOrigDate) { this.setData({ formError: '请选择日期' }); return }
     if (!myScheduleId) { this.setData({ formError: '该日期未找到排班记录' }); return }
-    // 已经是休息状态则不允许申请调班
-    if (this.data.myShiftIsRest) {
-      this.setData({ formError: `您在 ${formOrigDate} 已经是休息状态，无需申请调班` }); return
-    }
+    if (this.data.myShiftIsRest) { this.setData({ formError: '您已是休息状态，无需申请' }); return }
     if (!formReason) { this.setData({ formError: '请输入调班事由' }); return }
     if (!_pendingStatusId) { this.setData({ formError: '系统配置异常' }); return }
-
-    if (requestType === 'swap' && !this.data.formTargetEmpId) {
-      this.setData({ formError: '请选择调班对象' }); return
-    }
-    if (requestType === 'swap' && !this.data.formTargetDate) {
-      this.setData({ formError: '请选择换回排班日期' }); return
-    }
-
-    if (requestType === 'swap' && !this.data.formTargetShiftId) {
-      this.setData({ formError: '未获取到对方班次信息，请选择换回日期' }); return
-    }
-
+    if (requestType === 'direct_swap' && !this.data.formTargetEmpId) { this.setData({ formError: '请选择换班对象' }); return }
+    if (requestType === 'direct_swap' && !this.data.targetScheduleId) { this.setData({ formError: '对方在选定日期无排班' }); return }
+    if (requestType === 'swap_with_payback' && !this.data.formTargetEmpId) { this.setData({ formError: '请选择顶班人员' }); return }
     this.setData({ submitting: true, formError: '', formSuccess: '' })
     try {
-      const emp = getEmployee()
-      if (!emp) return
-
-      const payload: any = {
-        request_type: requestType,
-        applicant_employee_id: emp.id,
-        original_schedule_id: myScheduleId,
-        reason: formReason,
-        approval_status_dict_item_id: _pendingStatusId,
-      }
-
-      if (requestType === 'swap') {
+      const emp = getEmployee(); if (!emp) return
+      const payload: any = { request_type: requestType, applicant_employee_id: emp.id, original_schedule_id: myScheduleId, reason: formReason, approval_status_dict_item_id: _pendingStatusId, peer_status: requestType === 'leave' ? 'not_required' : 'pending_peer' }
+      if (requestType === 'direct_swap') {
         payload.target_employee_id = this.data.formTargetEmpId
         payload.target_schedule_id = this.data.targetScheduleId
-        if (this.data.formTargetDate) payload.target_date = this.data.formTargetDate
-        if (this.data.formTargetShiftId) payload.target_schedule_code_dict_item_id = this.data.formTargetShiftId
-      } else if (requestType === 'direct_change') {
-        payload.target_date = this.data.formTargetDate || this.data.formOrigDate
-        if (this.data.formTargetShiftId) {
-          payload.target_schedule_code_dict_item_id = this.data.formTargetShiftId
-        }
-        // Get shift_type_dict_item_id from the selected shift code
-        if (this.data.formTargetShiftId) {
-          try {
-            const codeItem: any[] = await query('dict_item', `id=eq.${this.data.formTargetShiftId}&select=extra_config&limit=1`)
-            const relatedCode = codeItem?.[0]?.extra_config?.related_shift_type_item_code
-            if (relatedCode) {
-              const dtList: any[] = await query('dict_type', 'type_code=eq.shift_type&select=id&limit=1')
-              if (dtList?.[0]) {
-                const shiftTypes: any[] = await query('dict_item', `dict_type_id=eq.${dtList[0].id}&item_code=eq.${relatedCode}&select=id&limit=1`)
-                if (shiftTypes?.[0]) payload.target_shift_type_dict_item_id = shiftTypes[0].id
-              }
-            }
-          } catch (e) { /* ignore */ }
-        }
+        payload.target_date = this.data.formTargetDate || formOrigDate
+      } else if (requestType === 'swap_with_payback') {
+        payload.target_employee_id = this.data.formTargetEmpId
+        payload.target_schedule_id = this.data.targetScheduleId
+        if (this.data.selectedPaybackDate) { payload.payback_date = this.data.selectedPaybackDate; payload.payback_schedule_id = this.data.selectedPaybackScheduleId }
       }
-
       await insert('shift_change_request', payload)
-
-      this.setData({
-        formSuccess: '调班申请已提交！',
-        formOrigDate: '', myShiftCode: '', myScheduleId: '',
-        formTargetDate: '', formTargetShiftLabel: '', formTargetShiftId: '',
-        formTargetEmpId: '', formTargetEmpName: '', targetScheduleId: '',
-        formReason: '', submitting: false,
-      })
+      if (payload.target_employee_id) {
+        try { await insert('employee_message', { employee_id: payload.target_employee_id, title: '调班确认请求', content: `${emp.name} 向您发起了${requestType === 'direct_swap' ? '直接换班' : '互换调班'}申请(${formOrigDate})，请在「调班申请-待我确认」中处理。`, is_read: false }) } catch { /* ignore */ }
+      }
+      this.setData({ formSuccess: '调班申请已提交！', formOrigDate: '', myShiftCode: '', myShiftCodeId: '', myScheduleId: '', formTargetDate: '', formTargetEmpId: '', formTargetEmpName: '', targetScheduleId: '', targetShiftCode: '', targetShiftCodeId: '', formReason: '', submitting: false, paybackDateOptions: [], paybackDateLabels: [], selectedPaybackDate: '', selectedPaybackScheduleId: '', targetEmployeeOptions: [] })
       this.loadRequests()
-    } catch (err: any) {
-      this.setData({ formError: err.message || '提交失败', submitting: false })
-    }
+    } catch (err: any) { this.setData({ formError: err.message || '提交失败', submitting: false }) }
   },
+
+  async loadPendingPeerRequests() {
+    this.setData({ pendingPeerLoading: true })
+    try {
+      const emp = getEmployee(); if (!emp) return
+      const rows: any[] = await query('shift_change_request', `target_employee_id=eq.${emp.id}&peer_status=eq.pending_peer&select=*&order=created_at.desc`)
+      const appIds = [...new Set(rows.map(r => r.applicant_employee_id).filter(Boolean))]
+      let nameMap: Record<string, string> = {}
+      if (appIds.length > 0) { const e: any[] = await query('employee', `id=in.(${appIds.join(',')})&select=id,full_name`); e.forEach(x => { nameMap[x.id] = x.full_name }) }
+      const allIds = [...new Set([...rows.map(r => r.original_schedule_id), ...rows.map(r => r.target_schedule_id)].filter(Boolean))]
+      let schedInfo: Record<string, any> = {}
+      if (allIds.length > 0) {
+        const s: any[] = await query('schedule', `id=in.(${allIds.join(',')})&select=id,schedule_date,schedule_code_dict_item_id`)
+        const cids = [...new Set(s.map(x => x.schedule_code_dict_item_id).filter(Boolean))]
+        let cn: Record<string, string> = {}
+        if (cids.length > 0) { const c: any[] = await query('dict_item', `id=in.(${cids.join(',')})&select=id,item_name`); c.forEach(x => { cn[x.id] = x.item_name || '?' }) }
+        s.forEach(x => { schedInfo[x.id] = { date: x.schedule_date, code: cn[x.schedule_code_dict_item_id] || '?' } })
+      }
+      const tl: Record<string, string> = { direct_swap: '直接换班', swap_with_payback: '互换调班', leave: '请假', swap: '换班', take_off: '请假替班' }
+      const reqs = rows.map(r => {
+        const orig = schedInfo[r.original_schedule_id]; const tgt = schedInfo[r.target_schedule_id]
+        return { id: r.id, applicantName: nameMap[r.applicant_employee_id] || '未知', requestType: r.request_type, typeLabel: tl[r.request_type] || r.request_type, originalDate: orig?.date || '', targetDate: tgt?.date || r.target_date || '', applicantShift: orig?.code || '', myShiftOnThatDay: r.request_type === 'direct_swap' ? (tgt?.code || '') : '休', paybackDate: r.payback_date || '', reason: r.reason || '', createdAt: r.created_at ? r.created_at.split('T')[0] : '' }
+      })
+      this.setData({ pendingPeerRequests: reqs, pendingPeerLoading: false })
+    } catch (e) { console.error('loadPendingPeerRequests', e); this.setData({ pendingPeerLoading: false }) }
+  },
+
+  async handlePeerResponse(e: any) {
+    const { id, action } = e.currentTarget.dataset
+    if (!id || !action) return
+    wx.showModal({
+      title: action === 'approve' ? '确认同意？' : '确认拒绝？',
+      content: action === 'approve' ? '同意后此调班申请将提交管理员审批' : '拒绝后此调班申请将关闭',
+      success: async (res) => {
+        if (!res.confirm) return
+        try {
+          const updateData: any = { peer_status: action === 'approve' ? 'peer_approved' : 'peer_rejected', peer_responded_at: new Date().toISOString() }
+          if (action === 'reject') {
+            const dtList: any[] = await query('dict_type', 'select=id,type_code')
+            const approvalTypeId = dtList.find(t => t.type_code === 'approval_status')?.id
+            if (approvalTypeId) { const items: any[] = await query('dict_item', `dict_type_id=eq.${approvalTypeId}&item_code=eq.rejected&select=id&limit=1`); if (items?.[0]) updateData.approval_status_dict_item_id = items[0].id }
+          }
+          await update('shift_change_request', `id=eq.${id}`, updateData)
+          wx.showToast({ title: action === 'approve' ? '已同意' : '已拒绝', icon: 'success' })
+          this.loadPendingPeerRequests()
+        } catch (err: any) { wx.showToast({ title: err.message || '操作失败', icon: 'none' }) }
+      }
+    })
+  },
+
 
   // ===== Urgent Shift Methods =====
 
@@ -520,7 +433,10 @@ Page({
       }
 
       // 5. 检测时间冲突 + 用工规则校验
-      const shiftDates = [...new Set(shifts.map(s => s.shift_date))]
+      const shiftDates = [...new Set(shifts.reduce((acc: string[], s: any) => {
+        const dates = Array.isArray(s.shift_dates) ? s.shift_dates : [s.shift_date];
+        return acc.concat(dates);
+      }, []))]
       let scheduleMap: Record<string, { category: string; startTime: string; endTime: string; hours: number }> = {}
       let monthlyHours = 0
       let weeklyHours = 0
@@ -640,11 +556,14 @@ Page({
       const urgentShifts = shifts
         .filter(s => new Date(s.signup_deadline) > now) // 仅显示未过截止时间的
         .map(s => {
-          const mySchedule = scheduleMap[s.shift_date]
+          const shiftDatesList: string[] = Array.isArray(s.shift_dates) ? s.shift_dates : [s.shift_date]
           let hasConflict = false
-          if (mySchedule && mySchedule.category !== 'rest' && mySchedule.category !== 'leave') {
-            // 有工作排班 => 时间冲突
-            hasConflict = true
+          for (const sd of shiftDatesList) {
+            const mySchedule = scheduleMap[sd]
+            if (mySchedule && mySchedule.category !== 'rest' && mySchedule.category !== 'leave') {
+              hasConflict = true
+              break
+            }
           }
 
           // 用工规则校验
@@ -685,7 +604,8 @@ Page({
           return {
             id: s.id,
             title: s.title,
-            shiftDate: s.shift_date,
+            shiftDate: (Array.isArray(s.shift_dates) && s.shift_dates.length > 0) ? s.shift_dates.join('、') : s.shift_date,
+            shiftDates: Array.isArray(s.shift_dates) ? s.shift_dates : [s.shift_date],
             startTime: s.start_time ? s.start_time.substring(0, 5) : '',
             endTime: s.end_time ? s.end_time.substring(0, 5) : '',
             requiredCount: s.required_count || 1,
@@ -708,7 +628,7 @@ Page({
       let signupShiftMap: Record<string, any> = {}
       if (signupShiftIds.length > 0) {
         const signupShifts: any[] = await query('urgent_shift',
-          `id=in.(${signupShiftIds.join(',')})`+`&select=id,title,shift_date,start_time,end_time,project_id`
+          `id=in.(${signupShiftIds.join(',')})`+`&select=id,title,shift_date,shift_dates,start_time,end_time,project_id`
         )
         signupShifts.forEach(s => { signupShiftMap[s.id] = s })
       }
@@ -725,7 +645,7 @@ Page({
         return {
           id: s.id,
           shiftTitle: shift.title || '紧急班次',
-          shiftDate: shift.shift_date || '',
+          shiftDate: (Array.isArray(shift.shift_dates) && shift.shift_dates.length > 0) ? shift.shift_dates.join('、') : (shift.shift_date || ''),
           timeRange: shift.start_time && shift.end_time
             ? `${shift.start_time.substring(0,5)}-${shift.end_time.substring(0,5)}` : '',
           projectName: shift.project_id ? projectMap[shift.project_id] || '' : '',

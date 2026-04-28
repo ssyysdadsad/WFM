@@ -1,16 +1,19 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router';
 import {
-  DatePicker, Drawer, Table, Button, Space, Tag, message, Select,
+  DatePicker, Drawer, Table, Button, Space, Tag, message, Select, Dropdown,
   Typography, Popconfirm, Descriptions, Divider, Badge, Input,
 } from 'antd';
 import {
-  TeamOutlined, PlusOutlined, DeleteOutlined, SearchOutlined, UserOutlined,
+  TeamOutlined, PlusOutlined, DeleteOutlined, SearchOutlined, UserOutlined, CalendarOutlined, DownloadOutlined,
 } from '@ant-design/icons';
+import type { MenuProps } from 'antd';
 import dayjs from 'dayjs';
 import { CrudPage } from '../CrudPage';
 import { listCrudRows, loadCrudForeignOptions, saveCrudRow } from '@/app/services/master-data.service';
 import { supabase } from '../supabase';
 import { getErrorMessage } from '@/app/lib/supabase/errors';
+import { exportProjectEmployeesToExcel, exportProjectScheduleToExcel } from '@/app/services/project-export.service';
 
 interface ProjectMember {
   id: string;
@@ -24,6 +27,7 @@ interface ProjectMember {
 }
 
 export function ProjectPage() {
+  const navigate = useNavigate();
   const [filterMonth, setFilterMonth] = useState<dayjs.Dayjs | null>(null);
 
   // 成员管理状态
@@ -198,7 +202,7 @@ export function ProjectPage() {
           ]},
           { key: 'start_date', title: '开始日期', type: 'date', required: true },
           { key: 'end_date', title: '结束日期', type: 'date', required: true },
-          { key: 'owner_employee_id', title: '负责人', foreignTable: 'employee', foreignLabel: 'full_name' },
+          { key: 'owner_user_id', title: '负责人', foreignTable: 'user_account', foreignLabel: 'username' },
           { key: 'project_status_dict_item_id', title: '状态', foreignTable: 'dict_item', foreignLabel: 'item_name', dictType: 'project_status', filterable: true },
           { key: 'remark', title: '备注', type: 'textarea', hideInTable: true },
           {
@@ -215,6 +219,81 @@ export function ProjectPage() {
                 管理成员
               </Button>
             ),
+          },
+          {
+            key: '_schedule',
+            title: '排班',
+            hideInForm: true,
+            width: 100,
+            render: (_: any, record: any) => (
+              <Button
+                type="link"
+                size="small"
+                icon={<CalendarOutlined />}
+                onClick={async () => {
+                  try {
+                    const { data, error } = await supabase
+                      .from('schedule_version')
+                      .select('id')
+                      .eq('project_id', record.id)
+                      .eq('is_active', true)
+                      .not('published_at', 'is', null)
+                      .limit(1)
+                      .single();
+                    if (error || !data) {
+                      message.warning('该项目暂无已发布的激活排班版本');
+                      return;
+                    }
+                    navigate(`/schedule?projectId=${record.id}&versionId=${data.id}`);
+                  } catch {
+                    message.warning('该项目暂无已发布的激活排班版本');
+                  }
+                }}
+              >
+                排班表
+              </Button>
+            ),
+          },
+          {
+            key: '_export',
+            title: '导出',
+            hideInForm: true,
+            width: 100,
+            render: (_: any, record: any) => {
+              const items: MenuProps['items'] = [
+                {
+                  key: 'emp',
+                  icon: <TeamOutlined />,
+                  label: '导出员工信息',
+                  onClick: async () => {
+                    try {
+                      await exportProjectEmployeesToExcel(record.id, record.project_name);
+                      message.success('员工信息已导出');
+                    } catch (e: any) {
+                      message.warning(e.message || '导出失败');
+                    }
+                  },
+                },
+                {
+                  key: 'sched',
+                  icon: <CalendarOutlined />,
+                  label: '导出排班表',
+                  onClick: async () => {
+                    try {
+                      await exportProjectScheduleToExcel(record.id, record.project_name);
+                      message.success('排班表已导出');
+                    } catch (e: any) {
+                      message.warning(e.message || '导出失败');
+                    }
+                  },
+                },
+              ];
+              return (
+                <Dropdown menu={{ items }} trigger={['click']}>
+                  <Button type="link" size="small" icon={<DownloadOutlined />}>导出</Button>
+                </Dropdown>
+              );
+            },
           },
         ]}
       />

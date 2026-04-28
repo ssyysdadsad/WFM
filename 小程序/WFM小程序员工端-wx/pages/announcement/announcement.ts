@@ -41,7 +41,7 @@ Page({
     this.setData({ loading: true })
     try {
       const rows: any[] = await query('announcement',
-        'select=id,title,content,announcement_type_dict_item_id,published_at&order=published_at.desc'
+        'select=id,title,content,announcement_type_dict_item_id,published_at,is_pinned&order=is_pinned.desc,published_at.desc'
       )
 
       // Get type names
@@ -64,6 +64,7 @@ Page({
           emoji: style.emoji,
           tagBg: style.bg,
           tagColor: style.color,
+          isPinned: r.is_pinned ?? false,
         }
       })
 

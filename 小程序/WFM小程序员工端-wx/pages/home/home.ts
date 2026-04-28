@@ -23,6 +23,8 @@ Page({
     calendarDays: [] as any[],
     workDays: 0,
     totalHours: 0,
+    urgentShifts: [] as any[],
+    urgentCount: 0,
   },
 
   onShow() {
@@ -49,11 +51,13 @@ Page({
       const startDate = `${yearMonth}-01`
       const endDate = `${yearMonth}-${String(daysInMonth).padStart(2, '0')}`
 
-      // 并行请求排班 + 班次配置
+      // 并行请求排班 + 班次配置 + 紧急班次
       const [schedRows, shiftTypes] = await Promise.all([
         this.fetchSchedule(employee.id, startDate, endDate),
         this.fetchShiftTypes(),
       ])
+      // 异步加载紧急班次（不阻塞主流程）
+      this.loadUrgentShifts(employee.id)
 
       // 构建 schedule map
       const schedule: Record<string, any> = {}
@@ -106,10 +110,15 @@ Page({
       const calendarDays: any[] = []
       const firstDow = new Date(currentYear, currentMonth - 1, 1).getDay()
       for (let i = 0; i < firstDow; i++) {
-        calendarDays.push({ day: 0, isToday: false })
+        calendarDays.push({ day: 0, isToday: false, code: '', startTime: '', style: {} })
       }
       for (let d = 1; d <= daysInMonth; d++) {
-        calendarDays.push({ day: d, isToday: d === todayDay })
+        const s = schedule[String(d)]
+        const code = s?.code || ''
+        const style = code ? (shiftTypes[code] || { bg: '#F5F5F5', text: '#9E9E9E' }) : {}
+        const timeStr = s?.time || ''
+        const startTime = timeStr ? timeStr.split('-')[0] : ''
+        calendarDays.push({ day: d, isToday: d === todayDay, code, style, startTime })
       }
 
       // Stats
@@ -272,4 +281,68 @@ Page({
   goApply() { wx.switchTab({ url: '/pages/apply/apply' }) },
   goAnnouncement() { wx.switchTab({ url: '/pages/announcement/announcement' }) },
   goProfile() { wx.switchTab({ url: '/pages/profile/profile' }) },
+  goUrgentShifts() {
+    wx.switchTab({ url: '/pages/apply/apply' })
+    // 延迟设置 tab 为 urgent
+    setTimeout(() => {
+      const pages = getCurrentPages()
+      const applyPage = pages[pages.length - 1] as any
+      if (applyPage && applyPage.switchTab) {
+        applyPage.switchTab({ currentTarget: { dataset: { tab: 'urgent' } } })
+      }
+    }, 300)
+  },
+
+  async loadUrgentShifts(employeeId: string) {
+    try {
+      // 查询 open 状态且未过期的紧急班次
+      const now = new Date().toISOString()
+      const rows: any[] = await query('urgent_shift',
+        `status=eq.open&signup_deadline=gt.${now}&select=id,title,shift_date,shift_dates,start_time,end_time,required_count,signup_deadline,project:project_id(project_name)&order=shift_date`
+      )
+
+      if (!rows || rows.length === 0) {
+        this.setData({ urgentShifts: [], urgentCount: 0 })
+        return
+      }
+
+      // 检查员工是否已报名
+      const shiftIds = rows.map(r => r.id)
+      const signups: any[] = await query('urgent_shift_signup',
+        `employee_id=eq.${employeeId}&urgent_shift_id=in.(${shiftIds.join(',')})&status=neq.cancelled&select=urgent_shift_id,status`
+      )
+      const signupMap: Record<string, string> = {}
+      ;(signups || []).forEach((s: any) => { signupMap[s.urgent_shift_id] = s.status })
+
+      const urgentShifts = rows.map((r: any) => ({
+        id: r.id,
+        title: r.title,
+        shiftDate: (Array.isArray(r.shift_dates) && r.shift_dates.length > 0) ? r.shift_dates.join('、') : r.shift_date,
+        startTime: (r.start_time || '').slice(0, 5),
+        endTime: (r.end_time || '').slice(0, 5),
+        requiredCount: r.required_count,
+        projectName: r.project?.project_name || '',
+        deadline: r.signup_deadline,
+        deadlineLabel: this.formatDeadline(r.signup_deadline),
+        signupStatus: signupMap[r.id] || '',  // '', 'pending', 'approved', 'rejected'
+      }))
+
+      this.setData({ urgentShifts, urgentCount: urgentShifts.length })
+    } catch (err) {
+      console.error('Load urgent shifts error:', err)
+      this.setData({ urgentShifts: [], urgentCount: 0 })
+    }
+  },
+
+  formatDeadline(deadline: string): string {
+    const d = new Date(deadline)
+    const now = new Date()
+    const diffMs = d.getTime() - now.getTime()
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
+    const diffMins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60))
+    if (diffHours >= 24) return `剩${Math.floor(diffHours / 24)}天`
+    if (diffHours > 0) return `剩${diffHours}小时${diffMins}分`
+    if (diffMins > 0) return `剩${diffMins}分钟`
+    return '即将截止'
+  },
 })

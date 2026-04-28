@@ -1,12 +1,13 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router';
-import { Card, Col, Row, Table, Tag, Typography, Spin, message, Badge, Select, Empty, Tooltip as AntTooltip, DatePicker } from 'antd';
+import { Card, Col, Row, Table, Tag, Typography, Spin, message, Badge, Select, Empty, Tooltip as AntTooltip, DatePicker, Modal, Button } from 'antd';
 import dayjs from 'dayjs';
 import {
   TeamOutlined, ProjectOutlined, CalendarOutlined, ToolOutlined,
   NotificationOutlined, ClockCircleOutlined, ReloadOutlined,
   AuditOutlined, ThunderboltOutlined, UserOutlined,
   CheckCircleOutlined, PauseCircleOutlined, QuestionCircleOutlined,
+  WarningOutlined, ExclamationCircleOutlined,
 } from '@ant-design/icons';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -16,6 +17,7 @@ import { getErrorMessage } from '@/app/lib/supabase/errors';
 import { getDashboardOverview, getWorkHoursSummary, getTodayEmployeeStatus, type TodayEmployeeRow } from '@/app/services/report.service';
 import { supabase } from '@/app/lib/supabase/client';
 import type { DashboardOverview, WorkHoursSummaryRow } from '@/app/types/report';
+import { validateScheduleBatch, type ValidationResult, type ScheduleViolation } from '@/app/services/labor-rule.service';
 
 const PIE_COLORS = ['#3B82F6', '#60A5FA', '#8B5CF6', '#A78BFA', '#94A3B8', '#F59E0B', '#10B981', '#F472B6'];
 
@@ -91,6 +93,11 @@ export function DashboardPage() {
   const [projectOptions, setProjectOptions] = useState<{ value: string; label: string }[]>([]);
   const [statusDate, setStatusDate] = useState<dayjs.Dayjs>(dayjs());
 
+  // Labor rule violations
+  const [violationResult, setViolationResult] = useState<ValidationResult | null>(null);
+  const [violationLoading, setViolationLoading] = useState(false);
+  const [violationModalOpen, setViolationModalOpen] = useState(false);
+
   useEffect(() => {
     loadData();
     loadProjectOptions();
@@ -159,6 +166,48 @@ export function DashboardPage() {
       console.error('Dashboard load error:', error);
     }
     setLoading(false);
+    // Auto-check labor rules
+    checkLaborRulesInBackground();
+  }
+
+  async function checkLaborRulesInBackground() {
+    setViolationLoading(true);
+    try {
+      // Get all active versions
+      const { data: versions } = await supabase.from('schedule_version').select('id, project_id').eq('is_active', true);
+      if (!versions?.length) { setViolationResult({ passed: true, hardViolations: [], softViolations: [] }); return; }
+
+      const versionIds = versions.map((v: any) => v.id);
+      const { data: schedules } = await supabase
+        .from('schedule')
+        .select('employee_id, schedule_date, planned_hours, schedule_code_dict_item_id')
+        .in('schedule_version_id', versionIds);
+
+      const { data: employees } = await supabase.from('employee').select('id, full_name');
+      const { data: dictItems } = await supabase.from('dict_item').select('id, item_name, extra_config');
+
+      const empMap = new Map((employees || []).map((e: any) => [e.id, e.full_name]));
+      const dictMap = new Map((dictItems || []).map((d: any) => [d.id, d]));
+
+      const entries = (schedules || []).map((s: any) => {
+        const dictItem = dictMap.get(s.schedule_code_dict_item_id);
+        const category = dictItem?.extra_config?.category || 'work';
+        return {
+          employeeId: s.employee_id,
+          employeeName: empMap.get(s.employee_id) || '-',
+          date: s.schedule_date,
+          plannedHours: Number(s.planned_hours || 0),
+          isWorkDay: category === 'work',
+        };
+      });
+
+      const result = await validateScheduleBatch(entries);
+      setViolationResult(result);
+    } catch (err) {
+      console.error('Labor rule check error:', err);
+    } finally {
+      setViolationLoading(false);
+    }
   }
 
   if (loading) {
@@ -243,6 +292,62 @@ export function DashboardPage() {
           </Card>
         </Col>
       </Row>
+
+      {/* Labor Rule Violations Card */}
+      {violationResult && (
+        <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
+          <Col xs={24}>
+            <Card
+              hoverable
+              onClick={() => violationResult.hardViolations.length + violationResult.softViolations.length > 0 && setViolationModalOpen(true)}
+              style={{
+                ...cardStyle, cursor: violationResult.passed ? 'default' : 'pointer',
+                borderLeft: violationResult.hardViolations.length > 0 ? '4px solid #ff4d4f'
+                  : violationResult.softViolations.length > 0 ? '4px solid #faad14'
+                  : '4px solid #52c41a',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  {violationLoading ? (
+                    <Spin size="small" />
+                  ) : violationResult.passed ? (
+                    <CheckCircleOutlined style={{ fontSize: 28, color: '#52c41a' }} />
+                  ) : (
+                    <WarningOutlined style={{ fontSize: 28, color: violationResult.hardViolations.length > 0 ? '#ff4d4f' : '#faad14' }} />
+                  )}
+                  <div>
+                    <div style={{ fontSize: 13, color: '#666', marginBottom: 2 }}>🛡️ 用工规则校验</div>
+                    {violationResult.passed ? (
+                      <div style={{ fontSize: 15, fontWeight: 600, color: '#52c41a' }}>所有排班均符合规则 ✓</div>
+                    ) : (
+                      <div style={{ fontSize: 15, fontWeight: 600, color: '#333' }}>
+                        {violationResult.hardViolations.length > 0 && (
+                          <Tag color="error" style={{ fontSize: 13, padding: '2px 8px' }}>
+                            {violationResult.hardViolations.length} 条硬约束违规
+                          </Tag>
+                        )}
+                        {violationResult.softViolations.length > 0 && (
+                          <Tag color="warning" style={{ fontSize: 13, padding: '2px 8px' }}>
+                            {violationResult.softViolations.length} 条软约束预警
+                          </Tag>
+                        )}
+                        <span style={{ fontSize: 12, color: '#999', marginLeft: 8 }}>点击查看详情</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <button
+                  onClick={(e) => { e.stopPropagation(); checkLaborRulesInBackground(); }}
+                  style={{ background: 'none', border: '1px solid #d9d9d9', borderRadius: 8, padding: '4px 12px', cursor: 'pointer', fontSize: 12, color: '#666' }}
+                >
+                  <ReloadOutlined /> 重新检查
+                </button>
+              </div>
+            </Card>
+          </Col>
+        </Row>
+      )}
 
       {/* Today Employee Status */}
       <TodayEmployeeStatusPanel
@@ -390,6 +495,71 @@ export function DashboardPage() {
           </Card>
         </Col>
       </Row>
+
+      {/* Labor Rule Violation Detail Modal */}
+      <Modal
+        title={
+          <span>
+            <ExclamationCircleOutlined style={{ color: violationResult?.hardViolations?.length ? '#ff4d4f' : '#faad14', marginRight: 8 }} />
+            用工规则校验结果
+          </span>
+        }
+        open={violationModalOpen}
+        onCancel={() => setViolationModalOpen(false)}
+        footer={[
+          <Button key="close" onClick={() => setViolationModalOpen(false)}>知道了</Button>,
+        ]}
+        width={640}
+      >
+        {violationResult && (
+          <div style={{ maxHeight: 480, overflowY: 'auto' }}>
+            {violationResult.hardViolations.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: '#ff4d4f', marginBottom: 8 }}>
+                  ⛔ 硬约束违规（{violationResult.hardViolations.length} 条，应当修正）
+                </div>
+                {violationResult.hardViolations.slice(0, 20).map((v, i) => (
+                  <div key={`hard-${i}`} style={{
+                    padding: '8px 12px', marginBottom: 4,
+                    background: '#fff2f0', borderRadius: 6,
+                    borderLeft: '3px solid #ff4d4f', fontSize: 13,
+                  }}>
+                    <div style={{ fontWeight: 500 }}>{v.message}</div>
+                    <div style={{ color: '#999', fontSize: 12 }}>规则：{v.ruleName}</div>
+                  </div>
+                ))}
+                {violationResult.hardViolations.length > 20 && (
+                  <div style={{ fontSize: 12, color: '#999', textAlign: 'center', padding: 8 }}>
+                    还有 {violationResult.hardViolations.length - 20} 条，请进入排班矩阵查看
+                  </div>
+                )}
+              </div>
+            )}
+            {violationResult.softViolations.length > 0 && (
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: '#faad14', marginBottom: 8 }}>
+                  ⚠️ 软约束预警（{violationResult.softViolations.length} 条，建议关注）
+                </div>
+                {violationResult.softViolations.slice(0, 20).map((v, i) => (
+                  <div key={`soft-${i}`} style={{
+                    padding: '8px 12px', marginBottom: 4,
+                    background: '#fffbe6', borderRadius: 6,
+                    borderLeft: '3px solid #faad14', fontSize: 13,
+                  }}>
+                    <div style={{ fontWeight: 500 }}>{v.message}</div>
+                    <div style={{ color: '#999', fontSize: 12 }}>规则：{v.ruleName}</div>
+                  </div>
+                ))}
+                {violationResult.softViolations.length > 20 && (
+                  <div style={{ fontSize: 12, color: '#999', textAlign: 'center', padding: 8 }}>
+                    还有 {violationResult.softViolations.length - 20} 条，请进入排班矩阵查看
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

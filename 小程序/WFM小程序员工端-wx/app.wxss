@@ -1,10 +1,11 @@
-/* ===== 全局样式 — Figma 蓝白渐变风格 ===== */
+/* ===== 全局样式 — 现代磨砂玻璃设计 ===== */
 page {
   font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Helvetica Neue', sans-serif;
-  background: linear-gradient(160deg, #F6F8FA 0%, #E9F4FF 100%);
-  color: #1A2E4A;
+  background: #F2F5F9;
+  color: #1A2233;
   font-size: 28rpx;
   min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
 }
 
 /* ===== 通用布局 ===== */
@@ -17,68 +18,72 @@ page {
 .gap-md { gap: 20rpx; }
 .gap-lg { gap: 32rpx; }
 
-/* ===== 卡片 ===== */
+/* ===== 卡片 — 毛玻璃风格 ===== */
 .card {
-  background: #fff;
-  border-radius: 24rpx;
+  background: rgba(255,255,255,0.92);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-radius: 28rpx;
   padding: 32rpx;
-  box-shadow: 0 4rpx 20rpx rgba(40,149,255,0.08);
-  border: 1rpx solid #DDE9FF;
+  box-shadow: 0 2rpx 16rpx rgba(0,0,0,0.04), 0 8rpx 32rpx rgba(0,0,0,0.03);
+  border: 1rpx solid rgba(255,255,255,0.6);
   margin-bottom: 24rpx;
 }
 .card-purple {
-  box-shadow: 0 4rpx 20rpx rgba(123,111,226,0.08);
-  border-color: #E8E5FF;
+  box-shadow: 0 2rpx 16rpx rgba(123,111,226,0.06), 0 8rpx 32rpx rgba(123,111,226,0.04);
+  border-color: rgba(232,229,255,0.6);
 }
 
 /* ===== 渐变背景头部 ===== */
 .header-gradient {
-  background: linear-gradient(135deg, #2895FF 0%, #3EAAFF 50%, #62D9FF 100%);
+  background: linear-gradient(145deg, #1E6FD9 0%, #3B8BF2 40%, #5BA8FF 80%, #7EC8FF 100%);
   position: relative;
   overflow: hidden;
   color: #fff;
 }
 .header-gradient .deco-circle-1 {
-  position: absolute; top: -80rpx; right: -80rpx;
-  width: 320rpx; height: 320rpx; border-radius: 50%;
-  background: rgba(255,255,255,0.06);
+  position: absolute; top: -100rpx; right: -60rpx;
+  width: 360rpx; height: 360rpx; border-radius: 50%;
+  background: radial-gradient(circle, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.02) 70%);
 }
 .header-gradient .deco-circle-2 {
-  position: absolute; bottom: 0; left: 0;
-  width: 200rpx; height: 200rpx; border-radius: 50%;
-  background: rgba(255,255,255,0.04);
+  position: absolute; bottom: -40rpx; left: -40rpx;
+  width: 240rpx; height: 240rpx; border-radius: 50%;
+  background: radial-gradient(circle, rgba(255,255,255,0.06) 0%, transparent 70%);
 }
 
 /* ===== 蓝色渐变按钮 ===== */
 .btn-primary {
   width: 100%;
-  height: 96rpx;
-  background: linear-gradient(90deg, #2895FF 0%, #62D9FF 100%);
+  height: 100rpx;
+  background: linear-gradient(135deg, #1E6FD9 0%, #3B8BF2 50%, #5BA8FF 100%);
   color: #fff;
-  border-radius: 24rpx;
+  border-radius: 28rpx;
   font-size: 30rpx;
   font-weight: 600;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 12rpx 36rpx rgba(40,149,255,0.30);
+  box-shadow: 0 8rpx 24rpx rgba(30,111,217,0.25);
   border: none;
+  letter-spacing: 1rpx;
 }
 .btn-primary::after { border: none; }
 .btn-primary[disabled] { opacity: 0.5; }
 
 .btn-outline {
   width: 100%;
-  height: 96rpx;
-  background: #fff;
+  height: 100rpx;
+  background: rgba(255,255,255,0.85);
   color: #D96B5A;
-  border: 2rpx solid #FFCFC9;
-  border-radius: 24rpx;
+  border: 2rpx solid rgba(255,207,201,0.6);
+  border-radius: 28rpx;
   font-size: 28rpx;
   font-weight: 500;
   display: flex;
   align-items: center;
   justify-content: center;
+  backdrop-filter: blur(10px);
 }
 .btn-outline::after { border: none; }
 
@@ -86,16 +91,18 @@ page {
 .input-group {
   display: flex;
   align-items: center;
-  background: #F6F8FA;
+  background: rgba(246,248,250,0.8);
   border-radius: 24rpx;
   padding: 0 32rpx;
-  height: 96rpx;
-  border: 2rpx solid #DDE9FF;
+  height: 100rpx;
+  border: 2rpx solid rgba(221,233,255,0.5);
   margin-bottom: 20rpx;
+  transition: border-color 0.2s;
 }
 .input-group:focus-within,
 .input-group.focus {
-  border-color: #62D9FF;
+  border-color: #5BA8FF;
+  background: #fff;
 }
 .input-group .icon {
   width: 36rpx; height: 36rpx;
@@ -105,7 +112,7 @@ page {
 .input-group input {
   flex: 1;
   font-size: 28rpx;
-  color: #1A2E4A;
+  color: #1A2233;
 }
 .input-group .placeholder {
   color: #C0CFDD;
@@ -114,10 +121,10 @@ page {
 /* ===== Tag ===== */
 .tag {
   display: inline-block;
-  padding: 4rpx 16rpx;
+  padding: 6rpx 18rpx;
   border-radius: 12rpx;
   font-size: 20rpx;
-  font-weight: 500;
+  font-weight: 600;
 }
 
 /* ===== Section Title ===== */
@@ -132,38 +139,39 @@ page {
   height: 32rpx;
   border-radius: 3rpx;
 }
-.section-title .bar-blue { background: #2895FF; }
-.section-title .bar-purple { background: #7B6FE2; }
+.section-title .bar-blue { background: linear-gradient(180deg, #3B8BF2, #1E6FD9); }
+.section-title .bar-purple { background: linear-gradient(180deg, #9B8BF4, #7B6FE2); }
+.section-title .bar-green { background: linear-gradient(180deg, #34D399, #10B981); }
 .section-title text {
   font-size: 28rpx;
   font-weight: 700;
-  color: #1A2E4A;
+  color: #1A2233;
 }
 
 /* ===== 提示 ===== */
 .alert-warning {
-  background: #FFF8E1;
+  background: rgba(255,248,225,0.9);
   color: #F57F17;
-  border: 2rpx solid #FFE082;
-  border-radius: 24rpx;
+  border: 2rpx solid rgba(255,224,130,0.5);
+  border-radius: 20rpx;
   padding: 24rpx;
   font-size: 26rpx;
   margin-bottom: 32rpx;
 }
 .alert-error {
-  background: #FFF0EE;
+  background: rgba(255,240,238,0.9);
   color: #D96B5A;
-  border: 2rpx solid #FFD9D4;
-  border-radius: 24rpx;
+  border: 2rpx solid rgba(255,217,212,0.5);
+  border-radius: 20rpx;
   padding: 16rpx 24rpx;
   font-size: 24rpx;
   margin-bottom: 24rpx;
 }
 .alert-success {
-  background: #F0FFF4;
+  background: rgba(240,255,244,0.9);
   color: #2E7D32;
-  border: 2rpx solid #C8E6C9;
-  border-radius: 24rpx;
+  border: 2rpx solid rgba(200,230,201,0.5);
+  border-radius: 20rpx;
   padding: 16rpx 24rpx;
   font-size: 24rpx;
   margin-bottom: 24rpx;
@@ -174,15 +182,15 @@ page {
   display: flex;
   align-items: center;
   padding: 24rpx 32rpx;
-  border-bottom: 1rpx solid #F0F5FA;
+  border-bottom: 1rpx solid rgba(240,245,250,0.8);
 }
 .info-row:last-child { border-bottom: none; }
 .info-row .label {
-  font-size: 24rpx; color: #A3B5C8;
+  font-size: 24rpx; color: #8899AA;
   width: 136rpx; flex-shrink: 0;
 }
 .info-row .value {
-  font-size: 26rpx; color: #1A2E4A;
+  font-size: 26rpx; color: #1A2233;
   font-weight: 500; flex: 1;
 }
 

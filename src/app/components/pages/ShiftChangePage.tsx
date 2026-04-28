@@ -1,10 +1,10 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import { Table, Button, Space, Typography, message, Tag, Modal, Input, Descriptions, Badge, Select, Card, Divider, Empty, Spin, Tooltip, Alert } from 'antd';
-import { CheckOutlined, CloseOutlined, ReloadOutlined, ExpandOutlined, FilterOutlined, SwapOutlined, UserSwitchOutlined, SearchOutlined, CalendarOutlined, WarningOutlined } from '@ant-design/icons';
+import { CheckOutlined, CloseOutlined, ReloadOutlined, ExpandOutlined, FilterOutlined, SwapOutlined, UserSwitchOutlined, SearchOutlined, CalendarOutlined, WarningOutlined, ScheduleOutlined } from '@ant-design/icons';
 import { getErrorMessage } from '@/app/lib/supabase/errors';
 import { useCurrentUser } from '@/app/hooks/useCurrentUser';
-import { approveShiftChange, listShiftChangeRequests, loadShiftChangeReferences, findAvailableReplacements, getMonthlyHoursImpact, type HoursImpact } from '@/app/services/shift-change.service';
+import { approveShiftChange, listShiftChangeRequests, loadShiftChangeReferences, getMonthlyHoursImpact, type HoursImpact } from '@/app/services/shift-change.service';
 import { validateShiftChange, type ValidationResult, type ScheduleViolation } from '@/app/services/labor-rule.service';
 import type { ApprovalStatusOption, ShiftChangeRequestRecord, AvailableReplacement } from '@/app/types/shift-change';
 
@@ -19,10 +19,6 @@ export function ShiftChangePage() {
   const [activeFilter, setActiveFilter] = useState<FilterTab>('pending');
   const [detailRecord, setDetailRecord] = useState<ShiftChangeRequestRecord | null>(null);
 
-  // For direct_change approval workflow
-  const [replacements, setReplacements] = useState<AvailableReplacement[]>([]);
-  const [selectedReplacement, setSelectedReplacement] = useState<string | null>(null);
-  const [loadingReplacements, setLoadingReplacements] = useState(false);
   const [approvalComment, setApprovalComment] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
@@ -32,6 +28,10 @@ export function ShiftChangePage() {
   const [loadingImpact, setLoadingImpact] = useState(false);
   // 用工规则预检查结果
   const [laborWarningsMap, setLaborWarningsMap] = useState<Record<string, { hard: ScheduleViolation[]; soft: ScheduleViolation[] }>>({}); 
+
+  // Schedule preview for detail modal
+  const [schedulePreview, setSchedulePreview] = useState<{ date: string; codeName: string; category: string; hours: number }[]>([]);
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   useEffect(() => { loadData(); loadRefs(); }, []);
 
@@ -108,38 +108,53 @@ export function ShiftChangePage() {
     setLaborWarningsMap(map);
   }
 
-  // When opening detail for direct_change pending request, load available replacements
-  async function openDetail(record: ShiftChangeRequestRecord) {
+  // Open detail modal
+  function openDetail(record: ShiftChangeRequestRecord) {
     setDetailRecord(record);
-    setSelectedReplacement(null);
     setApprovalComment('');
-    setReplacements([]);
     setHoursImpact(null);
+    setSchedulePreview([]);
+    // Load schedule preview
+    if (record.applicantEmployeeId && record.scheduleVersionId && record.originalScheduleDate) {
+      loadSchedulePreview(record.applicantEmployeeId, record.scheduleVersionId, record.originalScheduleDate);
+    }
+  }
 
-    if (record.requestType === 'direct_change' && !record.approvedAt && record.originalScheduleDate) {
-      setLoadingReplacements(true);
-      try {
-        // We need the schedule_version_id from the original schedule
-        const { supabase } = await import('@/app/lib/supabase/client');
-        const { data: schedData } = await supabase
-          .from('schedule')
-          .select('schedule_version_id')
-          .eq('id', record.originalScheduleId)
-          .single();
+  async function loadSchedulePreview(empId: string, versionId: string, centerDate: string) {
+    setPreviewLoading(true);
+    try {
+      const { supabase } = await import('@/app/lib/supabase/client');
+      const d = new Date(centerDate);
+      const start = new Date(d); start.setDate(d.getDate() - 7);
+      const end = new Date(d); end.setDate(d.getDate() + 7);
 
-        if (schedData?.schedule_version_id) {
-          const available = await findAvailableReplacements(
-            record.originalScheduleDate,
-            schedData.schedule_version_id,
-          );
-          // Filter out the applicant themselves
-          setReplacements(available.filter(r => r.employeeId !== record.applicantEmployeeId));
-        }
-      } catch (error) {
-        message.error(getErrorMessage(error, '查询可用替班人员失败'));
-      } finally {
-        setLoadingReplacements(false);
-      }
+      const { data: schedules } = await supabase
+        .from('schedule')
+        .select('schedule_date, planned_hours, schedule_code_dict_item_id')
+        .eq('employee_id', empId)
+        .eq('schedule_version_id', versionId)
+        .gte('schedule_date', start.toISOString().split('T')[0])
+        .lte('schedule_date', end.toISOString().split('T')[0])
+        .order('schedule_date');
+
+      const { data: dictItems } = await supabase.from('dict_item').select('id, item_name, extra_config');
+      const dictMap = new Map((dictItems || []).map((d: any) => [d.id, d]));
+
+      setSchedulePreview(
+        (schedules || []).map((s: any) => {
+          const dictItem = dictMap.get(s.schedule_code_dict_item_id);
+          return {
+            date: s.schedule_date,
+            codeName: dictItem?.item_name || '-',
+            category: dictItem?.extra_config?.category || 'work',
+            hours: Number(s.planned_hours || 0),
+          };
+        })
+      );
+    } catch {
+      setSchedulePreview([]);
+    } finally {
+      setPreviewLoading(false);
     }
   }
 
@@ -149,9 +164,9 @@ export function ShiftChangePage() {
       return;
     }
 
-    // For direct_change approval, must have a replacement selected
-    if (approved && record.requestType === 'direct_change' && !selectedReplacement) {
-      message.warning('请先选择替班人员');
+    // Peer status check
+    if (approved && record.peerStatus !== 'peer_approved' && record.peerStatus !== 'not_required') {
+      message.warning('对方尚未确认，无法通过审批');
       return;
     }
 
@@ -172,13 +187,9 @@ export function ShiftChangePage() {
           laborRelationDictItemId: record.applicantLaborRelationDictItemId || undefined,
         });
 
-        // Validate replacement employee (gaining hours)
-        const replacementEmpId = record.requestType === 'direct_change' && selectedReplacement
-          ? selectedReplacement
-          : record.applicantEmployeeId;
-        const replacementName = record.requestType === 'direct_change'
-          ? (replacements.find(r => r.employeeId === selectedReplacement)?.employeeName || '替班人')
-          : (record.applicantName || '申请人');
+        // Validate target employee (gaining hours) if applicable
+        const replacementEmpId = record.targetEmployeeId || record.applicantEmployeeId;
+        const replacementName = record.targetEmployeeName || record.applicantName || '申请人';
         const replacementValidation = await validateShiftChange({
           employeeId: replacementEmpId,
           employeeName: replacementName,
@@ -251,9 +262,6 @@ export function ShiftChangePage() {
         action: approved ? 'approve' : 'reject',
         approvalComment: approvalComment || undefined,
         operatorUserAccountId: currentUser.id,
-        replacementEmployeeId: approved && record.requestType === 'direct_change'
-          ? selectedReplacement!
-          : undefined,
       });
       message.success(approved ? '审批通过，排班已更新' : '已拒绝');
       setDetailRecord(null);
@@ -393,25 +401,27 @@ export function ShiftChangePage() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <Typography.Title level={4} style={{ margin: 0 }}>调班审批</Typography.Title>
-        <Button icon={<ReloadOutlined />} onClick={loadData}>刷新</Button>
-        {selectedRowKeys.length > 0 && (
-          <Space>
-            <Typography.Text type="secondary">已选 {selectedRowKeys.length} 条</Typography.Text>
-            <Button
-              type="primary" size="small"
-              icon={<CheckOutlined />}
-              loading={batchSubmitting}
-              style={{ background: '#52c41a', borderColor: '#52c41a' }}
-              onClick={() => handleBatchApproval(true)}
-            >批量通过</Button>
-            <Button
-              danger size="small"
-              icon={<CloseOutlined />}
-              loading={batchSubmitting}
-              onClick={() => handleBatchApproval(false)}
-            >批量拒绝</Button>
-          </Space>
-        )}
+        <Space>
+          {selectedRowKeys.length > 0 && (
+            <>
+              <Typography.Text type="secondary">已选 {selectedRowKeys.length} 条</Typography.Text>
+              <Button
+                type="primary" size="small"
+                icon={<CheckOutlined />}
+                loading={batchSubmitting}
+                style={{ background: '#52c41a', borderColor: '#52c41a' }}
+                onClick={() => handleBatchApproval(true)}
+              >批量通过</Button>
+              <Button
+                danger size="small"
+                icon={<CloseOutlined />}
+                loading={batchSubmitting}
+                onClick={() => handleBatchApproval(false)}
+              >批量拒绝</Button>
+            </>
+          )}
+          <Button icon={<ReloadOutlined />} onClick={loadData}>刷新</Button>
+        </Space>
       </div>
 
       {/* Filter Tabs */}
@@ -468,7 +478,7 @@ export function ShiftChangePage() {
                     icon={value === 'swap' ? <SwapOutlined /> : <UserSwitchOutlined />}
                     color={value === 'swap' ? 'blue' : 'orange'}
                   >
-                    {value === 'swap' ? '互换调班' : '直接变更'}
+                    {value === 'swap' ? '换班' : '请假'}
                   </Tag>
                   {isSameShift && (
                     <Tooltip title={`两人班次均为「${record.originalCodeName}」，互换无意义`}>
@@ -522,13 +532,26 @@ export function ShiftChangePage() {
                   </div>
                 );
               }
+              // take_off
               return (
                 <div>
-                  <div style={{ fontSize: 12, color: '#999' }}>申请调休</div>
-                  {record.targetCodeName && <Tag color="green">{record.targetCodeName}</Tag>}
-                  {!record.targetCodeName && <Tag>需安排替班</Tag>}
+                  <div style={{ fontSize: 12, color: '#999' }}>请假{record.targetEmployeeName ? `(替班:${record.targetEmployeeName})` : '(直接休)'}</div>
+                  {record.paybackDate && <Tag color="cyan">还班:{record.paybackDate}</Tag>}
                 </div>
               );
+            },
+          },
+          {
+            title: '对方确认', width: 100,
+            render: (_: unknown, record: ShiftChangeRequestRecord) => {
+              const map: Record<string, { color: string; label: string }> = {
+                pending_peer: { color: 'gold', label: '待确认' },
+                peer_approved: { color: 'green', label: '已同意' },
+                peer_rejected: { color: 'red', label: '已拒绝' },
+                not_required: { color: 'default', label: '无需' },
+              };
+              const s = map[record.peerStatus] || map.not_required;
+              return <Tag color={s.color}>{s.label}</Tag>;
             },
           },
           {
@@ -561,25 +584,6 @@ export function ShiftChangePage() {
               );
             },
           },
-          { title: '原因', dataIndex: 'reason', width: 100, ellipsis: true },
-          {
-            title: '申请时间', dataIndex: 'createdAt', width: 140,
-            render: (value?: string | null) => {
-              if (!value) return '-';
-              try {
-                const d = new Date(value);
-                return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
-              } catch { return value.substring(0, 16).replace('T', ' '); }
-            },
-          },
-          {
-            title: '审批状态', width: 90,
-            render: (_: unknown, record: ShiftChangeRequestRecord) => {
-              const color = record.statusCode?.includes('approved') ? 'green'
-                : record.statusCode?.includes('rejected') ? 'red' : 'orange';
-              return <Tag color={color}>{record.statusName}</Tag>;
-            },
-          },
           {
             title: '操作', key: 'action', width: 260, fixed: 'right' as const,
             render: (_: unknown, record: ShiftChangeRequestRecord) => (
@@ -596,7 +600,7 @@ export function ShiftChangePage() {
                   </Tooltip>
                 )}
                 {!record.approvedAt && record.statusCode?.includes('pending') ? (
-                  record.requestType === 'swap' ? (
+                  record.peerStatus === 'peer_approved' || record.peerStatus === 'not_required' ? (
                     <>
                       <Button type="link" size="small" icon={<CheckOutlined />} style={{ color: '#52c41a' }}
                         onClick={() => handleQuickApproval(record, true)}>通过</Button>
@@ -604,8 +608,7 @@ export function ShiftChangePage() {
                         onClick={() => handleQuickApproval(record, false)}>拒绝</Button>
                     </>
                   ) : (
-                    <Button type="link" size="small" icon={<UserSwitchOutlined />} style={{ color: '#fa8c16' }}
-                      onClick={() => openDetail(record)}>安排替班</Button>
+                    <Tag color="gold">待对方确认</Tag>
                   )
                 ) : (
                   <Typography.Text type="secondary">已处理</Typography.Text>
@@ -633,9 +636,9 @@ export function ShiftChangePage() {
             <Button type="primary" icon={<CheckOutlined />} loading={submitting}
               style={{ background: '#52c41a', borderColor: '#52c41a' }}
               onClick={() => detailRecord && handleApproval(detailRecord, true)}
-              disabled={detailRecord?.requestType === 'direct_change' && !selectedReplacement}
+              disabled={detailRecord?.peerStatus !== 'peer_approved' && detailRecord?.peerStatus !== 'not_required'}
             >
-              {detailRecord?.requestType === 'direct_change' ? '确认替班并通过' : '通过'}
+              通过
             </Button>
           </Space>
         ) : (
@@ -647,11 +650,19 @@ export function ShiftChangePage() {
             {/* Header */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
               <Tag
-                icon={detailRecord.requestType === 'swap' ? <SwapOutlined /> : <UserSwitchOutlined />}
-                color={detailRecord.requestType === 'swap' ? 'blue' : 'orange'}
+                icon={detailRecord.requestType === 'direct_swap' || detailRecord.requestType === 'swap' ? <SwapOutlined /> : <UserSwitchOutlined />}
+                color={
+                  detailRecord.requestType === 'direct_swap' ? 'blue' :
+                  detailRecord.requestType === 'swap_with_payback' ? 'purple' :
+                  detailRecord.requestType === 'swap' ? 'blue' :
+                  detailRecord.requestType === 'leave' ? 'green' : 'orange'
+                }
                 style={{ fontSize: 14, padding: '4px 12px' }}
               >
-                {detailRecord.requestType === 'swap' ? '互换调班' : '直接变更'}
+                {detailRecord.requestType === 'direct_swap' ? '直接换班' :
+                 detailRecord.requestType === 'swap_with_payback' ? '互换调班' :
+                 detailRecord.requestType === 'swap' ? '换班' :
+                 detailRecord.requestType === 'leave' ? '请假' : '请假'}
               </Tag>
               {(() => {
                 const color = detailRecord.statusCode?.includes('approved') ? 'green'
@@ -687,6 +698,43 @@ export function ShiftChangePage() {
               </div>
             </Card>
 
+            {/* Schedule Preview Timeline */}
+            {(schedulePreview.length > 0 || previewLoading) && (
+              <Card size="small" title={<span><ScheduleOutlined style={{ marginRight: 6 }} />近期排班预览</span>} style={{ marginBottom: 16 }}>
+                {previewLoading ? (
+                  <div style={{ textAlign: 'center', padding: 16 }}><Spin size="small" /></div>
+                ) : (
+                  <div style={{ display: 'flex', gap: 4, overflowX: 'auto', padding: '8px 0' }}>
+                    {schedulePreview.map((s) => {
+                      const isTarget = s.date === detailRecord.originalScheduleDate;
+                      const bgColor = isTarget ? '#fff7e6' : s.category === 'work' ? '#f0fdf4' : s.category === 'leave' ? '#fef3cd' : '#f0f5ff';
+                      const borderColor = isTarget ? '#fa8c16' : 'transparent';
+                      const dayLabel = ['日', '一', '二', '三', '四', '五', '六'][new Date(s.date).getDay()];
+                      return (
+                        <div key={s.date} style={{
+                          minWidth: 60, textAlign: 'center', padding: '6px 4px',
+                          borderRadius: 8, background: bgColor,
+                          border: isTarget ? `2px solid ${borderColor}` : '1px solid #f0f0f0',
+                          position: 'relative',
+                        }}>
+                          <div style={{ fontSize: 11, color: '#999' }}>{s.date.substring(5)}</div>
+                          <div style={{ fontSize: 10, color: '#bbb' }}>周{dayLabel}</div>
+                          <Tag
+                            color={s.category === 'work' ? 'green' : s.category === 'leave' ? 'orange' : 'blue'}
+                            style={{ margin: '4px 0 0', fontSize: 11, padding: '0 4px' }}
+                          >
+                            {s.codeName}
+                          </Tag>
+                          {s.hours > 0 && <div style={{ fontSize: 10, color: '#666' }}>{s.hours}h</div>}
+                          {isTarget && <div style={{ fontSize: 9, color: '#fa8c16', fontWeight: 600 }}>→ 申请日</div>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </Card>
+            )}
+
             {/* Reason */}
             <div style={{ marginBottom: 16, padding: '8px 12px', background: '#fffbe6', borderRadius: 6, border: '1px solid #ffe58f' }}>
               <span style={{ color: '#ad6800', fontWeight: 500 }}>申请原因：</span>
@@ -694,6 +742,84 @@ export function ShiftChangePage() {
             </div>
 
             {/* Type-specific content */}
+            {/* 直接换班 */}
+            {detailRecord.requestType === 'direct_swap' && (
+              <Card size="small" title="直接换班信息" style={{ marginBottom: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-around', padding: '12px 0' }}>
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontWeight: 600, fontSize: 15 }}>{detailRecord.applicantName}</div>
+                    <Tag style={{ marginTop: 4 }}>{detailRecord.originalCodeName || '-'}</Tag>
+                    <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>{detailRecord.originalScheduleDate}</div>
+                  </div>
+                  <SwapOutlined style={{ fontSize: 28, color: '#1677ff' }} />
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontWeight: 600, fontSize: 15 }}>{detailRecord.targetEmployeeName || '-'}</div>
+                    <Tag style={{ marginTop: 4 }}>{detailRecord.targetCodeName || '-'}</Tag>
+                    <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>{detailRecord.targetDate || '-'}</div>
+                  </div>
+                </div>
+                {detailRecord.originalCodeName && detailRecord.targetCodeName
+                  && detailRecord.originalCodeName === detailRecord.targetCodeName && (
+                  <Alert type="error" showIcon message="互换无意义"
+                    description={`两人班次均为「${detailRecord.originalCodeName}」，建议拒绝此申请。`}
+                    style={{ marginTop: 8 }} />
+                )}
+                <div style={{ marginTop: 8, padding: '8px 12px', background: detailRecord.peerStatus === 'peer_approved' ? '#f6ffed' : detailRecord.peerStatus === 'peer_rejected' ? '#fff2f0' : '#fffbe6', borderRadius: 6 }}>
+                  <span style={{ fontWeight: 500 }}>对方确认：</span>
+                  <Tag color={detailRecord.peerStatus === 'peer_approved' ? 'green' : detailRecord.peerStatus === 'peer_rejected' ? 'red' : 'gold'}>
+                    {detailRecord.peerStatus === 'peer_approved' ? '已同意' : detailRecord.peerStatus === 'peer_rejected' ? '已拒绝' : '待确认'}
+                  </Tag>
+                  {detailRecord.peerRespondedAt && <span style={{ fontSize: 12, color: '#999', marginLeft: 8 }}>{detailRecord.peerRespondedAt.substring(0, 16).replace('T', ' ')}</span>}
+                </div>
+              </Card>
+            )}
+
+            {/* 请假 (leave) */}
+            {detailRecord.requestType === 'leave' && (
+              <Card size="small" title="请假信息" style={{ marginBottom: 16 }}>
+                <div style={{ textAlign: 'center', padding: '12px 0' }}>
+                  <Tag color="green" style={{ fontSize: 14 }}>{detailRecord.originalScheduleDate}  {detailRecord.originalCodeName} → 休</Tag>
+                  <div style={{ fontSize: 13, color: '#666', marginTop: 8 }}>审批通过后将直接改为休息</div>
+                </div>
+              </Card>
+            )}
+
+            {/* 互换调班 (swap_with_payback) */}
+            {detailRecord.requestType === 'swap_with_payback' && (
+              <Card size="small" title="互换调班信息" style={{ marginBottom: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-around', padding: '8px 0' }}>
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontWeight: 600 }}>{detailRecord.applicantName}</div>
+                    <Tag style={{ marginTop: 4 }}>{detailRecord.originalCodeName} → 休</Tag>
+                    <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>{detailRecord.originalScheduleDate}（休假）</div>
+                  </div>
+                  <SwapOutlined style={{ fontSize: 24, color: '#722ed1' }} />
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontWeight: 600 }}>{detailRecord.targetEmployeeName || '-'}</div>
+                    <Tag color="purple" style={{ marginTop: 4 }}>休 → {detailRecord.originalCodeName}（顶班）</Tag>
+                    <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>{detailRecord.originalScheduleDate}</div>
+                  </div>
+                </div>
+                {detailRecord.paybackDate && (
+                  <div style={{ marginTop: 8, padding: '8px 12px', background: '#f9f0ff', borderRadius: 6, border: '1px solid #d3adf7' }}>
+                    <span style={{ fontWeight: 500 }}>📅 还班日：</span>
+                    <Tag color="purple">{detailRecord.paybackDate}</Tag>
+                    <div style={{ fontSize: 12, color: '#555', marginTop: 4, lineHeight: 1.6 }}>
+                      {detailRecord.applicantName}(休→{detailRecord.paybackCodeName || '上班'}) 替回 {detailRecord.targetEmployeeName}({detailRecord.paybackCodeName || '班次'}→休)
+                    </div>
+                  </div>
+                )}
+                <div style={{ marginTop: 8, padding: '8px 12px', background: detailRecord.peerStatus === 'peer_approved' ? '#f6ffed' : detailRecord.peerStatus === 'peer_rejected' ? '#fff2f0' : '#fffbe6', borderRadius: 6 }}>
+                  <span style={{ fontWeight: 500 }}>对方确认：</span>
+                  <Tag color={detailRecord.peerStatus === 'peer_approved' ? 'green' : detailRecord.peerStatus === 'peer_rejected' ? 'red' : 'gold'}>
+                    {detailRecord.peerStatus === 'peer_approved' ? '已同意' : detailRecord.peerStatus === 'peer_rejected' ? '已拒绝' : '待确认'}
+                  </Tag>
+                  {detailRecord.peerRespondedAt && <span style={{ fontSize: 12, color: '#999', marginLeft: 8 }}>{detailRecord.peerRespondedAt.substring(0, 16).replace('T', ' ')}</span>}
+                </div>
+              </Card>
+            )}
+
+            {/* 旧类型: swap */}
             {detailRecord.requestType === 'swap' && (
               <Card size="small" title="互换信息" style={{ marginBottom: 16 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-around', padding: '12px 0' }}>
@@ -705,106 +831,45 @@ export function ShiftChangePage() {
                   <SwapOutlined style={{ fontSize: 28, color: '#1677ff' }} />
                   <div style={{ textAlign: 'center' }}>
                     <div style={{ fontWeight: 600, fontSize: 15 }}>{detailRecord.targetEmployeeName || '-'}</div>
-                    <Tag style={{ marginTop: 4 }}>{detailRecord.targetCodeName || '对方班次'}</Tag>
+                    <Tag style={{ marginTop: 4 }}>{detailRecord.targetCodeName || '-'}</Tag>
                     <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>{detailRecord.targetDate || '-'}</div>
                   </div>
                 </div>
-                {/* 相同班次互换警告 */}
-                {detailRecord.originalCodeName && detailRecord.targetCodeName
-                  && detailRecord.originalCodeName === detailRecord.targetCodeName && (
-                  <Alert
-                    type="error" showIcon
-                    message="互换无意义"
-                    description={`两人班次均为「${detailRecord.originalCodeName}」，互换后排班无任何变化，建议拒绝此申请。`}
-                    style={{ marginTop: 8 }}
-                  />
-                )}
               </Card>
             )}
 
-            {detailRecord.requestType === 'direct_change' && isPending && (
-              <Card
-                size="small"
-                title={<span><UserSwitchOutlined style={{ marginRight: 6 }} />选择替班人员</span>}
-                style={{ marginBottom: 16, border: '2px solid #fa8c16' }}
-              >
-                <div style={{ marginBottom: 12, fontSize: 13, color: '#666' }}>
-                  <strong>{detailRecord.applicantName}</strong> 申请在 <Tag>{detailRecord.originalScheduleDate}</Tag> 调休，
-                  请从以下当天休息的员工中选择一位替班：
-                </div>
-
-                {loadingReplacements ? (
-                  <div style={{ textAlign: 'center', padding: 24 }}>
-                    <Spin tip="正在查找可用替班人员..." />
-                  </div>
-                ) : replacements.length === 0 ? (
-                  <Empty description="当天没有可用的替班人员（所有人都有排班）" />
-                ) : (
-                  <Select
-                    style={{ width: '100%' }}
-                    placeholder="搜索并选择替班人员"
-                    value={selectedReplacement}
-                    onChange={setSelectedReplacement}
-                    showSearch
-                    filterOption={(input, option) =>
-                      (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
-                    }
-                    options={replacements.map(r => ({
-                      value: r.employeeId,
-                      label: `${r.employeeName} - ${r.departmentName}${r.employeeNo ? ` (${r.employeeNo})` : ''}`,
-                    }))}
-                    size="large"
-                  />
-                )}
-
-                {selectedReplacement && (
-                  <div style={{
-                    marginTop: 12, padding: 12, background: '#f6ffed',
-                    borderRadius: 8, border: '1px solid #b7eb8f',
-                  }}>
-                    <div style={{ fontWeight: 500, marginBottom: 4 }}>📋 变更预览</div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <Tag color="orange">{detailRecord.applicantName}</Tag>
-                      <span>{detailRecord.originalCodeName}</span>
-                      <span>→</span>
-                      <Tag color="default">休</Tag>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-                      <Tag color="blue">{replacements.find(r => r.employeeId === selectedReplacement)?.employeeName}</Tag>
-                      <span>休</span>
-                      <span>→</span>
-                      <Tag color="green">{detailRecord.originalCodeName}</Tag>
-                    </div>
-                  </div>
-                )}
-
-                {/* Hours Impact Preview */}
-                {selectedReplacement && (
-                  <HoursImpactPreview
-                    detailRecord={detailRecord}
-                    selectedReplacement={selectedReplacement}
-                    replacements={replacements}
-                    hoursImpact={hoursImpact}
-                    loadingImpact={loadingImpact}
-                    setHoursImpact={setHoursImpact}
-                    setLoadingImpact={setLoadingImpact}
-                  />
-                )}
-              </Card>
-            )}
-
-            {detailRecord.requestType === 'direct_change' && !isPending && detailRecord.targetEmployeeName && (
-              <Card size="small" title="替班信息" style={{ marginBottom: 16 }}>
+            {/* 旧类型: take_off */}
+            {detailRecord.requestType === 'take_off' && (
+              <Card size="small" title="请假信息" style={{ marginBottom: 16 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-around', padding: '12px 0' }}>
                   <div style={{ textAlign: 'center' }}>
                     <div style={{ fontWeight: 600 }}>{detailRecord.applicantName}</div>
                     <Tag style={{ marginTop: 4 }}>{detailRecord.originalCodeName} → 休</Tag>
                   </div>
-                  <SwapOutlined style={{ fontSize: 24, color: '#52c41a' }} />
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontWeight: 600 }}>{detailRecord.targetEmployeeName}</div>
-                    <Tag color="green" style={{ marginTop: 4 }}>休 → {detailRecord.originalCodeName}</Tag>
+                  {detailRecord.targetEmployeeName ? (
+                    <>
+                      <SwapOutlined style={{ fontSize: 24, color: '#52c41a' }} />
+                      <div style={{ textAlign: 'center' }}>
+                        <div style={{ fontWeight: 600 }}>{detailRecord.targetEmployeeName}</div>
+                        <Tag color="green" style={{ marginTop: 4 }}>休 → {detailRecord.originalCodeName}</Tag>
+                      </div>
+                    </>
+                  ) : (
+                    <Tag color="orange">直接休息（无替班人）</Tag>
+                  )}
+                </div>
+                {detailRecord.paybackDate && (
+                  <div style={{ marginTop: 8, padding: '8px 12px', background: '#e6f4ff', borderRadius: 6 }}>
+                    <span style={{ fontWeight: 500 }}>📅 还班日期：</span><Tag color="cyan">{detailRecord.paybackDate}</Tag>
+                    <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>{detailRecord.applicantName}（{detailRecord.originalCodeName} → 上班）替回 {detailRecord.targetEmployeeName}（{detailRecord.originalCodeName} → 休息）</div>
                   </div>
+                )}
+                <div style={{ marginTop: 8, padding: '8px 12px', background: detailRecord.peerStatus === 'peer_approved' ? '#f6ffed' : detailRecord.peerStatus === 'peer_rejected' ? '#fff2f0' : '#fffbe6', borderRadius: 6 }}>
+                  <span style={{ fontWeight: 500 }}>对方确认：</span>
+                  <Tag color={detailRecord.peerStatus === 'peer_approved' ? 'green' : detailRecord.peerStatus === 'peer_rejected' ? 'red' : 'gold'}>
+                    {detailRecord.peerStatus === 'peer_approved' ? '已同意' : detailRecord.peerStatus === 'peer_rejected' ? '已拒绝' : detailRecord.peerStatus === 'pending_peer' ? '待确认' : '无需'}
+                  </Tag>
+                  {detailRecord.peerRespondedAt && <span style={{ fontSize: 12, color: '#999', marginLeft: 8 }}>{detailRecord.peerRespondedAt.substring(0, 16).replace('T', ' ')}</span>}
                 </div>
               </Card>
             )}
@@ -830,7 +895,7 @@ export function ShiftChangePage() {
                     {detailRecord.approvedAt.substring(0, 16).replace('T', ' ')}
                   </Descriptions.Item>
                   <Descriptions.Item label="审批人">
-                    {detailRecord.approverUserAccountId || '-'}
+                    {detailRecord.approverName || detailRecord.approverUserAccountId || '-'}
                   </Descriptions.Item>
                   {detailRecord.approvalComment && (
                     <Descriptions.Item label="审批意见" span={2}>

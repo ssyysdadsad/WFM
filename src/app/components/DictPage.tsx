@@ -1,12 +1,102 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Table, Button, Modal, Form, Input, Switch, Space, Typography, message, Tag, InputNumber, TimePicker, ColorPicker, Select } from 'antd';
+import { Table, Button, Modal, Form, Input, Switch, Space, Typography, message, Tag, InputNumber, TimePicker, ColorPicker, Select, Tooltip } from 'antd';
 import dayjs from 'dayjs';
-import { PlusOutlined, EditOutlined, ReloadOutlined, BookOutlined, DeleteOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, ReloadOutlined, BookOutlined, DeleteOutlined, CheckOutlined } from '@ant-design/icons';
 import { getErrorMessage } from '@/app/lib/supabase/errors';
 import { parseDictExtraConfig } from '@/app/lib/validators/dict';
 import { invalidateDictCache, useDict } from '@/app/hooks/useDict';
 import { listDictTypes, saveDictItem, saveDictType, deleteDictItem } from '@/app/services/dict.service';
 import type { DictItem, DictType } from '@/app/types/dict';
+
+// ====== Preset color palette for schedule codes ======
+const PRESET_COLORS = [
+  // 工作类 - 绿色系
+  { color: '#10B981', label: '翠绿' },
+  { color: '#34D399', label: '薄荷' },
+  { color: '#6EE7B7', label: '浅绿' },
+  { color: '#DEF1EA', label: '淡青' },
+  // 工作类 - 蓝色系
+  { color: '#3B82F6', label: '蔚蓝' },
+  { color: '#60A5FA', label: '天蓝' },
+  { color: '#93C5FD', label: '浅蓝' },
+  { color: '#DBEAFE', label: '冰蓝' },
+  // 休息类 - 灰/紫系
+  { color: '#9CA3AF', label: '银灰' },
+  { color: '#D1D5DB', label: '浅灰' },
+  { color: '#8B5CF6', label: '紫罗兰' },
+  { color: '#C4B5FD', label: '淡紫' },
+  // 请假/特殊 - 暖色系
+  { color: '#F59E0B', label: '琥珀' },
+  { color: '#FCD34D', label: '金黄' },
+  { color: '#FBBF24', label: '向日葵' },
+  { color: '#FDE68A', label: '淡黄' },
+  // 强调色
+  { color: '#EF4444', label: '红色' },
+  { color: '#F87171', label: '浅红' },
+  { color: '#FB923C', label: '橙色' },
+  { color: '#FDBA74', label: '浅橙' },
+  // 其他
+  { color: '#EC4899', label: '粉红' },
+  { color: '#F9A8D4', label: '浅粉' },
+  { color: '#14B8A6', label: '青绿' },
+  { color: '#5EEAD4', label: '浅青' },
+];
+
+/** Preset color palette with custom color picker fallback */
+function ColorPalettePicker({ value, onChange }: { value?: string; onChange?: (v: string) => void }) {
+  const currentColor = typeof value === 'string' ? value : (value as any)?.toHexString?.() || '#10B981';
+  const isPreset = PRESET_COLORS.some(p => p.color.toLowerCase() === currentColor.toLowerCase());
+
+  return (
+    <div>
+      <div style={{
+        display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: 6,
+        padding: 8, background: '#fafafa', borderRadius: 8, border: '1px solid #f0f0f0',
+        marginBottom: 8,
+      }}>
+        {PRESET_COLORS.map(p => {
+          const selected = p.color.toLowerCase() === currentColor.toLowerCase();
+          return (
+            <Tooltip key={p.color} title={p.label} placement="top">
+              <div
+                onClick={() => onChange?.(p.color)}
+                style={{
+                  width: 28, height: 28, borderRadius: 6, background: p.color,
+                  cursor: 'pointer', border: selected ? '2px solid #1677ff' : '1px solid rgba(0,0,0,0.08)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  transition: 'all 0.15s',
+                  boxShadow: selected ? '0 0 0 2px rgba(22,119,255,0.2)' : 'none',
+                }}
+              >
+                {selected && <CheckOutlined style={{ color: isLightColor(p.color) ? '#333' : '#fff', fontSize: 12 }} />}
+              </div>
+            </Tooltip>
+          );
+        })}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <ColorPicker
+          value={currentColor}
+          onChange={(c) => onChange?.(c.toHexString())}
+          size="small"
+        />
+        <span style={{ fontSize: 12, color: '#999' }}>
+          当前: <code style={{ background: currentColor, color: isLightColor(currentColor) ? '#333' : '#fff', padding: '1px 6px', borderRadius: 4 }}>{currentColor}</code>
+        </span>
+        {!isPreset && <Tag color="gold" style={{ fontSize: 11 }}>自定义</Tag>}
+      </div>
+    </div>
+  );
+}
+
+function isLightColor(hex: string): boolean {
+  const c = hex.replace('#', '');
+  const r = parseInt(c.substring(0, 2), 16);
+  const g = parseInt(c.substring(2, 4), 16);
+  const b = parseInt(c.substring(4, 6), 16);
+  return (r * 299 + g * 587 + b * 114) / 1000 > 160;
+}
+
 
 export function DictPage() {
   const [types, setTypes] = useState<DictType[]>([]);
@@ -150,7 +240,7 @@ export function DictPage() {
             </Space>
           </div>
           <Table
-            rowKey="id" size="small" loading={loading} dataSource={types} pagination={false}
+            rowKey="id" size="small" loading={loading} dataSource={types.filter(t => t.typeCode !== 'schedule_code')} pagination={false}
             onRow={(record) => ({ onClick: () => setSelectedType(record), style: { cursor: 'pointer', background: selectedType?.id === record.id ? '#e6f4ff' : undefined } })}
             columns={[
               { title: '名称', dataIndex: 'typeName', width: 100 },
@@ -386,7 +476,7 @@ export function DictPage() {
                 <Switch />
               </Form.Item>
               <Form.Item name="shift_color" label="班次颜色">
-                <ColorPicker showText />
+                <ColorPalettePicker />
               </Form.Item>
             </Space>
           ) : selectedType?.typeCode === 'schedule_code' ? (
@@ -424,7 +514,7 @@ export function DictPage() {
                 <Switch />
               </Form.Item>
               <Form.Item name="sc_color" label="标签颜色">
-                <ColorPicker showText />
+                <ColorPalettePicker />
               </Form.Item>
             </Space>
           ) : null}

@@ -239,12 +239,18 @@ export function ScheduleVersionPage() {
   const statusMap = useMemo(() => Object.fromEntries(statusItems.map((item) => [item.id, item.label])), [statusItems]);
 
   function isPublished(record: ScheduleVersionRecord) {
+    if (record.status) return record.status !== 'draft';
     const name = record.publishStatusDictItemId ? statusMap[record.publishStatusDictItemId] || '' : '';
     return !!(record.publishedAt || name.includes('发布') || name.includes('publish'));
   }
 
   function isActiveVersion(record: ScheduleVersionRecord) {
+    if (record.status) return record.status === 'active';
     return !!record.isActive;
+  }
+
+  function isDraftVersion(record: ScheduleVersionRecord) {
+    return record.status === 'draft';
   }
 
   // ====== Build grouped data ======

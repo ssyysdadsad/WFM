@@ -6,14 +6,12 @@ module.exports.firstChar = function(str, fallback) {
 </wxs>
 
 <view class="apply-page">
-  <!-- Top tabs: 3 tabs now -->
+  <!-- Top tabs -->
   <view class="tab-bar">
     <view class="tab {{activeTab === 'list' ? 'active' : ''}}" bindtap="switchTab" data-tab="list">申请记录</view>
     <view class="tab {{activeTab === 'new' ? 'active' : ''}}" bindtap="switchTab" data-tab="new">新建申请</view>
-    <view class="tab {{activeTab === 'urgent' ? 'active' : ''}}" bindtap="switchTab" data-tab="urgent">
-      紧急班次
-      <view wx:if="{{urgentShifts.length > 0}}" class="badge">{{urgentShifts.length}}</view>
-    </view>
+    <view class="tab {{activeTab === 'peer' ? 'active' : ''}}" bindtap="switchTab" data-tab="peer">待我确认</view>
+    <view class="tab {{activeTab === 'urgent' ? 'active' : ''}}" bindtap="switchTab" data-tab="urgent">紧急班次</view>
   </view>
 
   <!-- ========== LIST TAB ========== -->
@@ -21,7 +19,7 @@ module.exports.firstChar = function(str, fallback) {
     <view wx:if="{{loading}}" class="loading-center"><text style="color:#2895FF;">加载中...</text></view>
     <view wx:elif="{{requests.length === 0}}" class="empty-state">
       <text style="font-size:60rpx;">📋</text>
-      <text style="color:#A3B5C8;font-size:26rpx;margin-top:16rpx;">暂无申请记录</text>
+      <text style="color:#A3B5C8;font-size:26rpx;margin-top:16rpx;">暂无调班申请记录</text>
     </view>
     <view wx:else>
       <view wx:for="{{requests}}" wx:key="id" class="card request-card">
@@ -31,117 +29,187 @@ module.exports.firstChar = function(str, fallback) {
           <text class="req-time">{{item.createdAt}}</text>
         </view>
         <view class="req-body">
-          <text class="req-label">原班：{{item.originalDate}} {{item.originalShift}}</text>
-          <text wx:if="{{item.targetDate}}" class="req-label">调至：{{item.targetDate}} {{item.targetShift}}</text>
-          <text wx:if="{{item.targetEmployeeName}}" class="req-label">对调人：{{item.targetEmployeeName}}</text>
-          <text class="req-reason">原因：{{item.reason}}</text>
+          <text class="req-label">原排班日期：{{item.originalDate}} [{{item.originalShift}}]</text>
+          <text wx:if="{{item.targetEmployeeName}}" class="req-label">关联员工：{{item.targetEmployeeName}}</text>
+          <text wx:if="{{item.targetDate}}" class="req-label">对方日期：{{item.targetDate}}{{item.targetShift ? ' [' + item.targetShift + ']' : ''}}</text>
+          <text wx:if="{{item.paybackDate}}" class="req-label" style="color:#2895FF;">还班日期：{{item.paybackDate}}</text>
+          <text wx:if="{{item.peerStatusLabel}}" class="req-label" style="color:#F9A825;">对方确认：{{item.peerStatusLabel}}</text>
+          <text class="req-reason">{{item.reason}}</text>
         </view>
       </view>
     </view>
   </view>
 
-  <!-- ========== NEW APPLY TAB ========== -->
+  <!-- ========== NEW REQUEST TAB ========== -->
   <view wx:if="{{activeTab === 'new'}}" class="container">
-    <!-- Applicant info -->
     <view class="applicant-card">
-      <text class="applicant-line">当前申请人：<text class="applicant-bold">{{employee.name}} / {{employee.department}} /</text></text>
-      <text class="applicant-hint">审批人配置：排班主管，结果会同步员工端</text>
+      <text class="applicant-line">当前申请人：<text class="applicant-bold">{{employee.name}} / {{employee.department}}</text></text>
+      <text class="applicant-hint">审批通过后自动更新排班</text>
     </view>
 
-    <!-- Request type tabs -->
+    <!-- 类型选择 -->
     <view class="type-tabs">
-      <view class="type-tab {{requestType === 'direct_change' ? 'active-outline' : ''}}" bindtap="switchRequestType" data-type="direct_change">直接变更</view>
-      <view class="type-tab {{requestType === 'swap' ? 'active-fill' : ''}}" bindtap="switchRequestType" data-type="swap">互换调班</view>
+      <view class="type-tab {{requestType === 'direct_swap' ? 'active-fill' : ''}}" bindtap="switchRequestType" data-type="direct_swap">直接换班</view>
+      <view class="type-tab {{requestType === 'swap_with_payback' ? 'active-fill' : ''}}" bindtap="switchRequestType" data-type="swap_with_payback">互换调班</view>
+      <view class="type-tab {{requestType === 'leave' ? 'active-outline' : ''}}" bindtap="switchRequestType" data-type="leave">请假</view>
     </view>
 
-    <!-- Alert messages -->
+    <view wx:if="{{requestType === 'direct_swap'}}" style="font-size:22rpx;color:#666;margin:8rpx 0 16rpx;padding:8rpx 12rpx;background:#F0F7FF;border-radius:8rpx;">💡 两位非休员工互换各自班次，可跨日期</view>
+    <view wx:if="{{requestType === 'swap_with_payback'}}" style="font-size:22rpx;color:#666;margin:8rpx 0 16rpx;padding:8rpx 12rpx;background:#F9F0FF;border-radius:8rpx;">💡 您有班，换当天休息同事的班，需要事后还班</view>
+    <view wx:if="{{requestType === 'leave'}}" style="font-size:22rpx;color:#666;margin:8rpx 0 16rpx;padding:8rpx 12rpx;background:#F6FFED;border-radius:8rpx;">💡 当天班次直接改为休息，无需对方参与</view>
+
     <view wx:if="{{formSuccess}}" class="alert-success">{{formSuccess}}</view>
     <view wx:if="{{formError}}" class="alert-error">{{formError}}</view>
 
-    <!-- ===== DIRECT CHANGE FORM ===== -->
-    <block wx:if="{{requestType === 'direct_change'}}">
-      <view class="form-row">
-        <view class="form-col">
-          <text class="field-label">原排班日期</text>
-          <picker mode="date" value="{{formOrigDate}}" bindchange="onOrigDateChange">
-            <view class="input-box">
-              <text class="{{formOrigDate ? 'input-value' : 'input-placeholder'}}">{{formOrigDate || '选择日期'}}</text>
-              <text class="input-icon">📅</text>
-            </view>
-          </picker>
-        </view>
-        <view class="form-col">
-          <text class="field-label">我的班次</text>
-          <view class="input-box {{myShiftIsRest ? 'input-error' : ''}}">
-            <text class="input-value" style="{{myShiftIsRest ? 'color:#D96B5A;' : ''}}">{{myShiftCode || '自动获取'}}</text>
-          </view>
-          <text wx:if="{{myShiftIsRest}}" class="field-error">已是休息日，无需调班</text>
-        </view>
-      </view>
-    </block>
-
-    <!-- ===== SWAP FORM ===== -->
-    <block wx:elif="{{requestType === 'swap'}}">
-      <view class="form-row">
-        <view class="form-col">
-          <text class="field-label">原排班日期</text>
-          <picker mode="date" value="{{formOrigDate}}" bindchange="onOrigDateChange">
-            <view class="input-box">
-              <text class="{{formOrigDate ? 'input-value' : 'input-placeholder'}}">{{formOrigDate || '选择日期'}}</text>
-              <text class="input-icon">📅</text>
-            </view>
-          </picker>
-        </view>
-        <view class="form-col">
-          <text class="field-label">我的班次</text>
-          <view class="input-box {{myShiftIsRest ? 'input-error' : ''}}">
-            <text class="input-value" style="{{myShiftIsRest ? 'color:#D96B5A;' : ''}}">{{myShiftCode || '自动获取'}}</text>
-          </view>
-          <text wx:if="{{myShiftIsRest}}" class="field-error">已是休息日，无需调班</text>
-        </view>
-      </view>
-
-      <text class="field-label">选择调班对象（该日期休息的员工）</text>
-      <picker range="{{targetEmployeeOptions}}" range-key="label" value="{{targetEmpPickerIndex}}" bindchange="onTargetEmpChange">
-        <view class="input-box">
-          <text class="{{formTargetEmpName ? 'input-value' : 'input-placeholder'}}">{{formTargetEmpName || '请选择被调班者'}}</text>
-        </view>
-      </picker>
-
-      <view class="swap-arrow">
-        <text class="swap-icon">⇅</text>
-      </view>
-
-      <view class="form-row">
-        <view class="form-col">
-          <text class="field-label">换回排班日期</text>
-          <picker mode="date" value="{{formTargetDate}}" bindchange="onTargetDateChange">
-            <view class="input-box">
-              <text class="{{formTargetDate ? 'input-value' : 'input-placeholder'}}">{{formTargetDate || '请先选择调班对象'}}</text>
-              <text class="input-icon">📅</text>
-            </view>
-          </picker>
-        </view>
-        <view class="form-col">
-          <text class="field-label">对方班次</text>
+    <!-- 我的日期 + 班次 -->
+    <view class="form-row">
+      <view class="form-col">
+        <text class="field-label">我的申请日期</text>
+        <picker mode="date" value="{{formOrigDate}}" bindchange="onOrigDateChange">
           <view class="input-box">
-            <text class="{{formTargetShiftLabel ? 'input-value' : 'input-placeholder'}}">{{formTargetShiftLabel || '自动获取'}}</text>
+            <text class="{{formOrigDate ? 'input-value' : 'input-placeholder'}}">{{formOrigDate || '选择日期'}}</text>
+            <text class="input-icon">📅</text>
           </view>
-        </view>
+        </picker>
       </view>
-    </block>
-
-    <!-- Reason -->
-    <text class="field-label" style="margin-top:24rpx;">调班事由</text>
-    <view class="textarea-box">
-      <textarea placeholder="请输入调班原因..." value="{{formReason}}" bindinput="onReasonInput"
-        placeholder-class="input-placeholder" auto-height maxlength="200" />
+      <view class="form-col">
+        <text class="field-label">我的班次</text>
+        <view class="input-box {{myShiftIsRest ? 'input-error' : ''}}">
+          <text class="input-value" style="{{myShiftIsRest ? 'color:#D96B5A;' : ''}}">{{myShiftCode || '自动获取'}}</text>
+        </view>
+        <text wx:if="{{myShiftIsRest}}" class="field-error">当天已是休息，无法申请</text>
+      </view>
     </view>
 
-    <!-- Submit -->
+    <!-- 直接换班 -->
+    <block wx:if="{{requestType === 'direct_swap' && formOrigDate && !myShiftIsRest}}">
+      <text class="field-label" style="margin-top:16rpx;">对方换班日期（可跨日）</text>
+      <picker mode="date" value="{{formTargetDate || formOrigDate}}" bindchange="onTargetDateChange">
+        <view class="input-box">
+          <text class="{{formTargetDate ? 'input-value' : 'input-placeholder'}}">{{formTargetDate || '默认同日，可修改'}}</text>
+          <text class="input-icon">📅</text>
+        </view>
+      </picker>
+      <text class="field-label" style="margin-top:16rpx;">选择换班对象（非休且班次不同）</text>
+      <block wx:if="{{targetEmployeeOptions.length > 0}}">
+        <picker range="{{targetEmployeeOptions}}" range-key="label" value="{{targetEmpPickerIndex}}" bindchange="onTargetEmpChange">
+          <view class="input-box">
+            <text class="{{formTargetEmpName ? 'input-value' : 'input-placeholder'}}">{{formTargetEmpName || '请选择'}}</text>
+          </view>
+        </picker>
+      </block>
+      <view wx:else class="empty-hint"><text>该日无可互换班次的员工</text></view>
+      <block wx:if="{{formTargetEmpId && targetShiftCode}}">
+        <view style="margin-top:12rpx;padding:12rpx;background:#F0F7FF;border-radius:12rpx;border-left:4rpx solid #4DA0FF;">
+          <text style="font-size:24rpx;color:#333;">⇄ 换班预览</text>
+          <view style="display:flex;flex-direction:row;margin-top:8rpx;">
+            <view style="flex:1;text-align:center;">
+              <text style="font-size:22rpx;color:#666;">我({{formOrigDate}})</text>
+              <text style="display:block;font-size:28rpx;font-weight:bold;color:#1677ff;">{{myShiftCode}}</text>
+            </view>
+            <text style="font-size:28rpx;color:#4DA0FF;align-self:center;margin:0 12rpx;">⇄</text>
+            <view style="flex:1;text-align:center;">
+              <text style="font-size:22rpx;color:#666;">{{formTargetEmpName}}({{formTargetDate || formOrigDate}})</text>
+              <text style="display:block;font-size:28rpx;font-weight:bold;color:#1677ff;">{{targetShiftCode}}</text>
+            </view>
+          </view>
+        </view>
+      </block>
+    </block>
+
+    <!-- 互换调班 -->
+    <block wx:if="{{requestType === 'swap_with_payback' && formOrigDate && !myShiftIsRest}}">
+      <text class="field-label" style="margin-top:16rpx;">选择顶班人（当天休息的员工）</text>
+      <block wx:if="{{targetEmployeeOptions.length > 0}}">
+        <picker range="{{targetEmployeeOptions}}" range-key="label" value="{{targetEmpPickerIndex}}" bindchange="onTargetEmpChange">
+          <view class="input-box">
+            <text class="{{formTargetEmpName ? 'input-value' : 'input-placeholder'}}">{{formTargetEmpName || '请选择当天休息的同事'}}</text>
+          </view>
+        </picker>
+      </block>
+      <view wx:else class="empty-hint"><text>当天无休息的同事</text></view>
+      <view wx:if="{{formTargetEmpId}}" style="margin-top:12rpx;padding:12rpx;background:#F9F0FF;border-radius:12rpx;border-left:4rpx solid #722ed1;">
+        <text style="font-size:24rpx;color:#555;">{{formOrigDate}} 顶班：我[{{myShiftCode}}→休] ↔ {{formTargetEmpName}}[休→{{myShiftCode}}]</text>
+      </view>
+      <block wx:if="{{formTargetEmpId}}">
+        <text class="field-label" style="margin-top:16rpx;">选择还班日期</text>
+        <block wx:if="{{paybackDateOptions.length > 0}}">
+          <picker range="{{paybackDateLabels}}" value="{{selectedPaybackIndex}}" bindchange="onPaybackDateChange">
+            <view class="input-box">
+              <text class="{{selectedPaybackDate ? 'input-value' : 'input-placeholder'}}">{{selectedPaybackDate ? paybackDateLabels[selectedPaybackIndex] : '请选择还班日期'}}</text>
+              <text class="input-icon">📅</text>
+            </view>
+          </picker>
+          <text class="field-hint">还班日：我上班，{{formTargetEmpName}}休息</text>
+        </block>
+        <view wx:else class="empty-hint" style="background:#FFF8E1;">
+          <text style="color:#D96B5A;">本月内无合适还班日</text>
+          <text style="font-size:22rpx;color:#F9A825;margin-top:6rpx;">建议改为申请「请假」</text>
+        </view>
+      </block>
+    </block>
+
+    <!-- 请假 -->
+    <block wx:if="{{requestType === 'leave' && formOrigDate && !myShiftIsRest}}">
+      <view style="margin-top:12rpx;padding:12rpx;background:#F6FFED;border-radius:12rpx;border-left:4rpx solid #52c41a;">
+        <text style="font-size:26rpx;color:#333;">📋 审批通过后：{{formOrigDate}} [{{myShiftCode}}] → 休</text>
+      </view>
+    </block>
+
+    <text class="field-label" style="margin-top:24rpx;">调班事由</text>
+    <view class="textarea-box">
+      <textarea placeholder="请输入调班原因..." value="{{formReason}}" bindinput="onReasonInput" placeholder-class="input-placeholder" auto-height maxlength="200" />
+    </view>
     <button class="submit-btn {{myShiftIsRest ? 'btn-disabled' : ''}}" bindtap="handleSubmit" disabled="{{submitting || myShiftIsRest}}">
       <text>{{submitting ? '提交中...' : (myShiftIsRest ? '当前班次为休息，无法申请' : '提交申请')}}</text>
     </button>
+  </view>
+
+  <!-- ========== PEER CONFIRM TAB ========== -->
+  <view wx:if="{{activeTab === 'peer'}}" class="container">
+    <view wx:if="{{pendingPeerLoading}}" class="loading-center"><text style="color:#2895FF;">加载中...</text></view>
+    <view wx:elif="{{pendingPeerRequests.length === 0}}" class="empty-state">
+      <text style="font-size:60rpx;">✅</text>
+      <text style="color:#A3B5C8;font-size:26rpx;margin-top:16rpx;">暂无待确认的调班申请</text>
+    </view>
+    <view wx:else>
+      <view wx:for="{{pendingPeerRequests}}" wx:key="id" class="card request-card">
+        <view class="req-header">
+          <text class="tag" style="background:#FFF8E1;color:#F9A825;">待确认</text>
+          <text class="req-type-tag">{{item.typeLabel}}</text>
+          <text class="req-time">{{item.createdAt}}</text>
+        </view>
+        <view class="req-body">
+          <text class="req-label">申请人：{{item.applicantName}}</text>
+          <text class="req-label">日期：{{item.originalDate}}</text>
+          <!-- 直接换班 -->
+          <view wx:if="{{item.requestType === 'direct_swap'}}" class="peer-shift-info" style="border-left-color:#4DA0FF;background:#F0F7FF;">
+            <text class="req-label" style="color:#1677ff;">🔄 直接换班</text>
+            <text class="req-label">{{item.applicantName}} [{{item.applicantShift}}]（{{item.originalDate}}）⇄ 我 [{{item.myShiftOnThatDay}}]（{{item.targetDate}}）</text>
+          </view>
+          <!-- 互换调班 -->
+          <view wx:if="{{item.requestType === 'swap_with_payback'}}" class="peer-shift-info" style="border-left-color:#722ed1;background:#F9F0FF;">
+            <text class="req-label" style="color:#722ed1;">🔀 互换调班</text>
+            <text class="req-label">{{item.originalDate}}：{{item.applicantName}} [{{item.applicantShift}}→休] ↔ 我 [休→上班]</text>
+            <text wx:if="{{item.paybackDate}}" class="req-label" style="color:#2895FF;">📅 还班日：{{item.paybackDate}}（我上班，{{item.applicantName}}休息）</text>
+          </view>
+          <!-- 旧类型 swap -->
+          <view wx:if="{{item.requestType === 'swap'}}" class="peer-shift-info">
+            <text class="req-label" style="color:#1677ff;">🔄 换班：{{item.applicantName}}[{{item.applicantShift}}] ↔ 我[{{item.myShiftOnThatDay}}]</text>
+          </view>
+          <!-- 旧类型 take_off -->
+          <view wx:if="{{item.requestType === 'take_off'}}" class="peer-shift-info">
+            <text class="req-label" style="color:#F9A825;">🌙 替班：{{item.applicantName}}[休] ↔ 我[{{item.myShiftOnThatDay}}]上班</text>
+            <text wx:if="{{item.paybackDate}}" class="req-label" style="color:#2895FF;">📅 还班日：{{item.paybackDate}}</text>
+          </view>
+          <text class="req-reason">原因：{{item.reason}}</text>
+        </view>
+        <view class="peer-actions">
+          <button class="peer-btn peer-reject" data-id="{{item.id}}" data-action="reject" bindtap="handlePeerResponse">拒绝</button>
+          <button class="peer-btn peer-approve" data-id="{{item.id}}" data-action="approve" bindtap="handlePeerResponse">同意</button>
+        </view>
+      </view>
+    </view>
   </view>
 
   <!-- ========== URGENT SHIFT TAB ========== -->
@@ -165,7 +233,6 @@ module.exports.firstChar = function(str, fallback) {
 
     <!-- 可报名的紧急班次 -->
     <text class="section-title" style="margin-top:16rpx;">🔥 可报名的紧急班次</text>
-
     <view wx:if="{{urgentLoading}}" class="loading-center"><text style="color:#2895FF;">加载中...</text></view>
     <view wx:elif="{{urgentShifts.length === 0}}" class="empty-state">
       <text style="font-size:60rpx;">✅</text>
@@ -245,4 +312,5 @@ module.exports.firstChar = function(str, fallback) {
       </view>
     </view>
   </view>
+
 </view>

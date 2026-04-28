@@ -184,12 +184,16 @@ export function parseEmployeeExcel(file: File): Promise<ImportRow[]> {
   });
 }
 
-/** 批量导入员工（返回成功数 / 失败行信息） */
+/** 批量导入员工（返回成功数 / 失败行信息 / 账号开通统计） */
 export async function batchImportEmployees(
   rows: ImportRow[],
   departments: ReferenceOption[],
   channels: ReferenceOption[],
-): Promise<{ successCount: number; failedRows: { rowIndex: number; name: string; reason: string }[] }> {
+): Promise<{
+  successCount: number;
+  failedRows: { rowIndex: number; name: string; reason: string }[];
+  accountProvisionResult: { success: number; failed: number; errors: string[] };
+}> {
   const deptLabelMap = Object.fromEntries(departments.map((d) => [d.label.trim(), d.id]));
   const channelLabelMap = Object.fromEntries(channels.map((c) => [c.label.trim(), c.id]));
 
@@ -242,8 +246,38 @@ export async function batchImportEmployees(
     }
   } catch { /* ignore */ }
 
+  // 预加载 employee 角色 ID（用于自动开通账号）
+  let employeeRoleId: string | null = null;
+  try {
+    const { data: roleData } = await supabase
+      .from('role')
+      .select('id')
+      .eq('role_code', 'employee')
+      .single();
+    if (roleData) employeeRoleId = roleData.id;
+  } catch { /* ignore */ }
+
+  // 预加载已有账号的手机号和员工ID集合（避免重复开通）
+  const existingAccountMobiles = new Set<string>();
+  const existingAccountEmpIds = new Set<string>();
+  try {
+    const { data: existingAccounts } = await supabase
+      .from('user_account')
+      .select('username, employee_id');
+    (existingAccounts || []).forEach((a: any) => {
+      if (a.username) existingAccountMobiles.add(a.username);
+      if (a.employee_id) existingAccountEmpIds.add(a.employee_id);
+    });
+  } catch { /* ignore */ }
+
   let successCount = 0;
   const failedRows: { rowIndex: number; name: string; reason: string }[] = [];
+
+  // 账号开通统计
+  const accountProvisionResult = { success: 0, failed: 0, errors: [] as string[] };
+
+  // 收集成功导入的员工信息（用于后续自动开通账号）
+  const importedEmployees: { id: string; fullName: string; mobileNumber: string }[] = [];
 
   // 本地校验失败的行直接跳过
   const validRows = rows.filter((row) => !row.error);
@@ -313,6 +347,15 @@ export async function batchImportEmployees(
 
       successCount++;
 
+      // 收集成功导入的员工（用于自动开通账号）
+      if (savedEmployee?.id && row.mobileNumber) {
+        importedEmployees.push({
+          id: savedEmployee.id,
+          fullName: row.fullName,
+          mobileNumber: row.mobileNumber,
+        });
+      }
+
       // 如果有未匹配的技能名，仍然算成功，但附加警告
       if (unmatchedSkills.length > 0) {
         failedRows.push({
@@ -326,5 +369,53 @@ export async function batchImportEmployees(
     }
   }
 
-  return { successCount, failedRows };
+  // ── 自动为成功导入的员工开通登录账号 ──────────────────────────
+  if (importedEmployees.length > 0 && employeeRoleId) {
+    for (const emp of importedEmployees) {
+      // 跳过已有账号的员工
+      if (existingAccountMobiles.has(emp.mobileNumber) || existingAccountEmpIds.has(emp.id)) {
+        accountProvisionResult.success++; // 已有账号视为成功
+        continue;
+      }
+
+      const defaultPassword = emp.mobileNumber.slice(-6); // 手机号后6位作为初始密码
+      try {
+        const { data: acct, error: acctErr } = await supabase
+          .from('user_account')
+          .insert({
+            username: emp.mobileNumber,
+            password_hash: `mock::${defaultPassword}`,
+            employee_id: emp.id,
+            account_status: 'active',
+            account_source: 'web',
+            is_enabled: true,
+            must_change_password: true,
+          })
+          .select('id')
+          .single();
+
+        if (acctErr) {
+          if (acctErr.code === '23505') {
+            // 唯一约束冲突 = 已有账号，跳过
+            accountProvisionResult.success++;
+          } else {
+            accountProvisionResult.errors.push(`${emp.fullName}(${emp.mobileNumber}): ${acctErr.message}`);
+            accountProvisionResult.failed++;
+          }
+          continue;
+        }
+
+        // 绑定 employee 角色
+        if (acct?.id) {
+          await supabase.from('user_role').insert({ user_account_id: acct.id, role_id: employeeRoleId });
+        }
+        accountProvisionResult.success++;
+      } catch (e: any) {
+        accountProvisionResult.errors.push(`${emp.fullName}(${emp.mobileNumber}): ${e.message || '未知错误'}`);
+        accountProvisionResult.failed++;
+      }
+    }
+  }
+
+  return { successCount, failedRows, accountProvisionResult };
 }

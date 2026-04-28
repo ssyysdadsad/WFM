@@ -192,6 +192,7 @@ export function useScheduleMatrix() {
     dataLoaded,
     error,
     refreshReferences,
+    refreshVersions,
     refreshMatrix,
     handleVersionChange,
   };

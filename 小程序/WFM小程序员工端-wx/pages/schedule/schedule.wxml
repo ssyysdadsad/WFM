@@ -82,6 +82,7 @@ module.exports.firstChar = function(str, fallback) {
           bindtap="selectDay" data-day="{{item.day}}">
           <text class="day-num">{{item.day || ''}}</text>
           <text wx:if="{{item.code}}" class="day-code" style="color:{{item.style.text}};">{{item.code}}</text>
+          <text wx:if="{{item.startTime}}" class="day-start-time" style="color:{{item.style.text}};">{{item.startTime}}</text>
           <view wx:if="{{item.isToday}}" class="today-dot"></view>
         </view>
       </view>
@@ -199,13 +200,23 @@ module.exports.firstChar = function(str, fallback) {
       <view class="bar bar-blue"></view>
       <text class="legend-title">班次图例</text>
     </view>
-    <view class="legend-list">
-      <view wx:for="{{legendItems}}" wx:key="code" class="legend-chip" style="background:{{item.bg}};color:{{item.text}};border:1rpx solid {{item.text}}20;">
-        <text class="legend-chip-code">{{item.code}}</text>
-        <text class="legend-chip-name">{{item.label}}</text>
+    <view class="legend-grid">
+      <view wx:for="{{legendItems}}" wx:key="code" class="legend-item">
+        <view class="legend-color-block" style="background:{{item.bg}};color:{{item.text}};border:2rpx solid {{item.text}}30;">
+          <text class="legend-code">{{item.code}}</text>
+        </view>
+        <view class="legend-detail">
+          <text class="legend-name">{{item.label}}</text>
+          <text wx:if="{{item.category === 'rest'}}" class="legend-time">休息</text>
+          <text wx:elif="{{item.category === 'leave'}}" class="legend-time">请假</text>
+        </view>
+        <text wx:if="{{item.hours > 0}}" class="legend-hours">{{item.hours}}h</text>
       </view>
     </view>
   </view>
+
+  <!-- 离屏 canvas 用于导出图片 -->
+  <canvas type="2d" id="exportCanvas" style="position:fixed;left:-9999px;top:0;width:750px;height:1200px;"></canvas>
 
   <view wx:if="{{loading}}" class="loading-overlay">
     <view class="loading-spinner"></view>

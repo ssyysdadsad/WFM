@@ -19,6 +19,7 @@ import 'dayjs/locale/zh-cn';
 import { getErrorMessage } from '@/app/lib/supabase/errors';
 // useDict no longer needed — shift_type merged into schedule_code
 import { useScheduleMatrix } from '@/app/hooks/useScheduleMatrix';
+import { useCurrentUser } from '@/app/hooks/useCurrentUser';
 import {
   bulkUpsertScheduleCells,
   checkScheduleConflicts,
@@ -27,6 +28,7 @@ import {
   ensureConflictFree,
   resolveShiftTypeDictItemId,
 } from '@/app/services/schedule.service';
+import { createDraftFromActive, publishDraft } from '@/app/services/schedule-version.service';
 import { validateScheduleBatch, type ScheduleViolation, type ValidationResult } from '@/app/services/labor-rule.service';
 import type { ScheduleCellChange, ScheduleCellRecord } from '@/app/types/schedule';
 
@@ -89,6 +91,7 @@ function getAvatarColor(name: string): string {
 
 export function ScheduleMatrixPage() {
   const navigate = useNavigate();
+  const { currentUser } = useCurrentUser();
   const {
     projects,
     versions,
@@ -98,6 +101,7 @@ export function ScheduleMatrixPage() {
     selectedProject,
     setSelectedProject,
     selectedVersion,
+    setSelectedVersion,
     selectedMonth,
     setSelectedMonth,
     selectedDept,
@@ -107,6 +111,7 @@ export function ScheduleMatrixPage() {
     loading,
     dataLoaded,
     error,
+    refreshVersions,
     refreshMatrix,
     handleVersionChange,
   } = useScheduleMatrix();
@@ -121,6 +126,13 @@ export function ScheduleMatrixPage() {
   // ===== Edit Mode =====
   const [isEditing, setIsEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [creatingDraft, setCreatingDraft] = useState(false);
+  const [publishingDraft, setPublishingDraft] = useState(false);
+
+  // 当前选中版本的状态信息
+  const currentVersion = useMemo(() => versions.find(v => v.id === selectedVersion), [versions, selectedVersion]);
+  const isDraftVersion = currentVersion?.status === 'draft';
+  const isActiveVersion = currentVersion?.status === 'active' || currentVersion?.isActive;
 
   // ===== Brush Mode: select a code, then click cells to paint =====
   const [brushCodeId, setBrushCodeId] = useState<string | null>(null);
@@ -282,10 +294,7 @@ export function ScheduleMatrixPage() {
 
   const filteredEmployees = useMemo(() => {
     let emps = allEmployees;
-    // 只显示在当前版本中有排班数据的员工
-    if (involvedEmpIds.size > 0) {
-      emps = emps.filter(e => involvedEmpIds.has(e.id));
-    }
+    // 显示所有项目成员（不再按排班数据过滤，确保新加入的成员也能看到）
     // Filter by department
     if (selectedDept) emps = emps.filter(e => e.departmentId === selectedDept);
     // Filter by search text
@@ -302,7 +311,7 @@ export function ScheduleMatrixPage() {
       });
     }
     return emps;
-  }, [allEmployees, involvedEmpIds, selectedDept, searchText, empSortOrderMap]);
+  }, [allEmployees, selectedDept, searchText, empSortOrderMap]);
 
   // matrix rows
   const matrixData = useMemo(() => {
@@ -373,6 +382,19 @@ export function ScheduleMatrixPage() {
     const unscheduled = total - scheduled;
     return { total, scheduled, unscheduled };
   }, [filteredEmployees, visibleSchedules, allDays, dataLoaded]);
+
+  // 今日各班次人数分布
+  const todayCodeDistribution = useMemo(() => {
+    if (!dataLoaded) return [];
+    const todaySchedules = schedules.filter(s => s.scheduleDate === todayStr);
+    const counts: Record<string, number> = {};
+    todaySchedules.forEach(s => {
+      counts[s.scheduleCodeDictItemId] = (counts[s.scheduleCodeDictItemId] || 0) + 1;
+    });
+    return codeItems
+      .map(c => ({ code: c, count: counts[c.id] || 0 }))
+      .filter(item => item.count > 0);
+  }, [schedules, todayStr, codeItems, dataLoaded]);
 
   // Build project labels with disambiguation for same-name projects
   const projectLabels = useMemo(() => {
@@ -1062,13 +1084,17 @@ export function ScheduleMatrixPage() {
 
         <Select
           placeholder={selectedProject ? '选择版本' : '先选项目'}
-          style={{ width: 160 }}
+          style={{ width: 200 }}
           value={selectedVersion}
           onChange={handleVersionChange}
-          options={versions.map(v => ({
-            label: `v${v.versionNo} · ${v.generationType === 'manual' ? '手工' : v.generationType === 'template' ? '模板' : v.generationType === 'shift_change' ? '调班' : v.generationType}`,
-            value: v.id,
-          }))}
+          options={versions.map(v => {
+            const genLabel = v.generationType === 'manual' ? '手工' : v.generationType === 'template' ? '模板' : v.generationType === 'shift_change' ? '调班' : v.generationType;
+            const statusLabel = v.status === 'draft' ? ' [草稿]' : v.status === 'active' ? '' : v.status === 'archived' ? ' [归档]' : '';
+            return {
+              label: `v${v.versionNo} · ${genLabel}${statusLabel}`,
+              value: v.id,
+            };
+          })}
           disabled={!selectedProject}
           variant="borderless"
         />
@@ -1116,40 +1142,105 @@ export function ScheduleMatrixPage() {
         <div style={{ flex: 1 }} />
 
         {dataLoaded && !isEditing && (
-          <Button
-            type="primary"
-            icon={<EditOutlined />}
-            onClick={() => setIsEditing(true)}
-            style={{
-              background: '#FF6B6B',
-              borderColor: '#FF6B6B',
-              borderRadius: 20,
-              fontWeight: 600,
-              paddingInline: 20,
-            }}
-          >
-            进入编辑
-          </Button>
+          <Space>
+            {isDraftVersion && (
+              <Tag color="orange" style={{ fontSize: 13, padding: '2px 10px', borderRadius: 12 }}>草稿版本</Tag>
+            )}
+            <Button
+              type="primary"
+              icon={<EditOutlined />}
+              loading={creatingDraft}
+              onClick={async () => {
+                if (isDraftVersion) {
+                  // 已是草稿，直接进入编辑
+                  setIsEditing(true);
+                  return;
+                }
+                if (!selectedVersion || !selectedProject) return;
+                // 从激活版本创建草稿
+                setCreatingDraft(true);
+                try {
+                  const draftId = await createDraftFromActive(selectedVersion, currentUser?.id, currentUser?.displayName);
+                  // 刷新版本列表并切换到草稿
+                  if (selectedProject) {
+                    await refreshVersions(selectedProject);
+                  }
+                  setSelectedVersion(draftId);
+                  // 等刷新完再进入编辑
+                  setTimeout(() => {
+                    setIsEditing(true);
+                  }, 300);
+                  message.success('已创建草稿副本，正在编辑中');
+                } catch (err) {
+                  message.error(getErrorMessage(err, '创建草稿失败'));
+                } finally {
+                  setCreatingDraft(false);
+                }
+              }}
+              style={{
+                background: isDraftVersion ? '#faad14' : '#FF6B6B',
+                borderColor: isDraftVersion ? '#faad14' : '#FF6B6B',
+                borderRadius: 20,
+                fontWeight: 600,
+                paddingInline: 20,
+              }}
+            >
+              {isDraftVersion ? '继续编辑草稿' : '进入编辑'}
+            </Button>
+          </Space>
         )}
         {isEditing && (
-          <Button
-            icon={<CloseOutlined />}
-            onClick={async () => {
-              setIsEditing(false);
-              setBrushCodeId(null);
-              // Run labor rule validation on exit edit
-              runLaborValidation(true);
-            }}
-            style={{
-              borderRadius: 20,
-              fontWeight: 600,
-              paddingInline: 20,
-              borderColor: '#FF6B6B',
-              color: '#FF6B6B',
-            }}
-          >
-            退出编辑
-          </Button>
+          <Space>
+            <Button
+              type="primary"
+              loading={publishingDraft}
+              onClick={async () => {
+                if (!selectedVersion) return;
+                setPublishingDraft(true);
+                try {
+                  await publishDraft(selectedVersion, currentUser?.id);
+                  message.success('草稿已发布为当前生效版本');
+                  setIsEditing(false);
+                  setBrushCodeId(null);
+                  if (selectedProject) {
+                    await refreshVersions(selectedProject);
+                  }
+                  refreshMatrix();
+                } catch (err) {
+                  message.error(getErrorMessage(err, '发布草稿失败'));
+                } finally {
+                  setPublishingDraft(false);
+                }
+              }}
+              style={{
+                background: '#52c41a',
+                borderColor: '#52c41a',
+                borderRadius: 20,
+                fontWeight: 600,
+                paddingInline: 20,
+              }}
+            >
+              发布草稿
+            </Button>
+            <Button
+              icon={<CloseOutlined />}
+              onClick={async () => {
+                setIsEditing(false);
+                setBrushCodeId(null);
+                // Run labor rule validation on exit edit
+                runLaborValidation(true);
+              }}
+              style={{
+                borderRadius: 20,
+                fontWeight: 600,
+                paddingInline: 20,
+                borderColor: '#FF6B6B',
+                color: '#FF6B6B',
+              }}
+            >
+              退出编辑
+            </Button>
+          </Space>
         )}
         {violations && (violations.hardViolations.length > 0 || violations.softViolations.length > 0) && (
           <Button
@@ -1206,7 +1297,7 @@ export function ScheduleMatrixPage() {
             ) : (
               <>
                 <EditOutlined style={{ marginRight: 8 }} />
-                编辑模式 — 点击单元格修改 · 拖拽单元格交换班次
+                {isDraftVersion ? `草稿 v${currentVersion?.versionNo} 编辑中` : '编辑模式'} — 点击单元格修改 · 拖拽单元格交换班次 · 编辑完成后请点击「发布草稿」
               </>
             )}
           </span>
@@ -1469,6 +1560,43 @@ export function ScheduleMatrixPage() {
               {selectedProjectName || '-'}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ===== Today Shift Distribution ===== */}
+      {dataLoaded && todayCodeDistribution.length > 0 && (
+        <div style={{
+          display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap',
+          alignItems: 'center', padding: '8px 16px',
+          background: 'linear-gradient(135deg, #f0f9ff 0%, #f5f0ff 100%)',
+          borderRadius: 10, border: '1px solid #e8ecf4',
+        }}>
+          <Typography.Text style={{ fontSize: 12, color: '#666', marginRight: 4 }}>
+            📊 今日班次分布
+          </Typography.Text>
+          {todayCodeDistribution.map(item => {
+            const bg = codeColorMap[item.code.id];
+            const isRest = isRestCategory(item.code);
+            return (
+              <div key={item.code.id} style={{
+                display: 'flex', alignItems: 'center', gap: 4,
+                padding: '2px 10px', borderRadius: 16,
+                background: '#fff', border: '1px solid #eee',
+              }}>
+                <Tag style={{
+                  backgroundColor: bg,
+                  color: isRest ? REST_TEXT : getContrastColor(bg),
+                  border: 'none', borderRadius: 4,
+                  padding: '0 6px', fontSize: 11, fontWeight: 600,
+                  lineHeight: '18px', margin: 0,
+                }}>
+                  {item.code.itemName}
+                </Tag>
+                <span style={{ fontSize: 14, fontWeight: 700, color: '#333' }}>{item.count}</span>
+                <span style={{ fontSize: 11, color: '#999' }}>人</span>
+              </div>
+            );
+          })}
         </div>
       )}
 

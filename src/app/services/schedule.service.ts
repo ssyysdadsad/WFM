@@ -130,7 +130,7 @@ export async function loadScheduleMatrixReferences(projectId?: string) {
 export async function listScheduleVersionOptions(projectId: string) {
   const { data, error } = await supabase
     .from('schedule_version')
-    .select('id, version_no, schedule_month, generation_type')
+    .select('id, version_no, schedule_month, generation_type, status, is_active')
     .eq('project_id', projectId)
     .order('version_no', { ascending: false });
 
@@ -144,6 +144,8 @@ export async function listScheduleVersionOptions(projectId: string) {
       versionNo: row.version_no,
       scheduleMonth: row.schedule_month,
       generationType: row.generation_type,
+      status: row.status ?? 'draft',
+      isActive: row.is_active ?? false,
     }),
   );
 }

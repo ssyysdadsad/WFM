@@ -62,6 +62,11 @@ export function UrgentShiftPage() {
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [skills, setSkills] = useState<SkillOption[]>([]);
 
+  // Filters
+  const [filterStatus, setFilterStatus] = useState<string | undefined>();
+  const [filterProject, setFilterProject] = useState<string | undefined>();
+  const [filterDateRange, setFilterDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(null);
+
   // Signup drawer
   const [signupDrawerOpen, setSignupDrawerOpen] = useState(false);
   const [signupShift, setSignupShift] = useState<UrgentShiftRecord | null>(null);
@@ -90,7 +95,18 @@ export function UrgentShiftPage() {
     setLoading(true);
     try {
       const data = await listUrgentShifts();
-      setShifts(data);
+
+      // 自动关闭已过截止时间但仍为 open 的记录
+      const now = new Date();
+      const expired = data.filter(s => s.status === 'open' && new Date(s.signupDeadline) < now);
+      if (expired.length > 0) {
+        await Promise.all(expired.map(s => updateUrgentShift(s.id, { status: 'closed' })));
+        // 重新加载以获取最新状态
+        const refreshed = await listUrgentShifts();
+        setShifts(refreshed);
+      } else {
+        setShifts(data);
+      }
     } catch (err) {
       message.error(getErrorMessage(err, '加载列表失败'));
     } finally {
@@ -100,6 +116,34 @@ export function UrgentShiftPage() {
 
   useEffect(() => { loadRefs(); loadShifts(); }, []);
 
+  // Filtered data
+  const filteredShifts = useMemo(() => {
+    return shifts.filter(s => {
+      if (filterStatus && s.status !== filterStatus) return false;
+      if (filterProject && s.projectId !== filterProject) return false;
+      if (filterDateRange) {
+        const dates = s.shiftDates || [s.shiftDate];
+        const anyInRange = dates.some((dateStr: string) => {
+          const d = dayjs(dateStr);
+          return !d.isBefore(filterDateRange[0], 'day') && !d.isAfter(filterDateRange[1], 'day');
+        });
+        if (!anyInRange) return false;
+      }
+      return true;
+    });
+  }, [shifts, filterStatus, filterProject, filterDateRange]);
+
+  // Stats
+  const stats = useMemo(() => {
+    const openCount = shifts.filter(s => s.status === 'open').length;
+    const closedCount = shifts.filter(s => s.status === 'closed').length;
+    const totalSignups = shifts.reduce((sum, s) => sum + (s.signupCount || 0), 0);
+    const fulfilledCount = shifts.filter(s => s.status === 'open' && (s.approvedCount || 0) >= s.requiredCount).length;
+    return { openCount, closedCount, totalSignups, fulfilledCount };
+  }, [shifts]);
+
+  const hasFilter = !!(filterStatus || filterProject || filterDateRange);
+
   /* ===== Create / Edit ===== */
   const openCreate = () => {
     setEditingId(null);
@@ -107,7 +151,7 @@ export function UrgentShiftPage() {
     form.setFieldsValue({
       shiftType: '业务需要',
       requiredCount: 1,
-      shiftDate: dayjs(),
+      shiftDates: [dayjs()],
       signupDeadline: dayjs().add(1, 'day'),
     });
     setModalOpen(true);
@@ -118,7 +162,7 @@ export function UrgentShiftPage() {
     form.setFieldsValue({
       title: record.title,
       shiftType: record.shiftType,
-      shiftDate: dayjs(record.shiftDate),
+      shiftDates: (record.shiftDates || [record.shiftDate]).map((d: string) => dayjs(d)),
       startTime: record.startTime ? dayjs(record.startTime, 'HH:mm:ss') : undefined,
       endTime: record.endTime ? dayjs(record.endTime, 'HH:mm:ss') : undefined,
       requiredCount: record.requiredCount,
@@ -133,10 +177,18 @@ export function UrgentShiftPage() {
   const handleSave = async () => {
     try {
       const values = await form.validateFields();
-      const payload = {
+      const dates: dayjs.Dayjs[] = values.shiftDates || [];
+      if (dates.length === 0) {
+        message.warning('请至少选择一个日期');
+        return;
+      }
+      const shiftDatesArr = dates.map((d: dayjs.Dayjs) => d.format('YYYY-MM-DD'));
+
+      const payload: any = {
         title: values.title,
         shiftType: values.shiftType,
-        shiftDate: values.shiftDate.format('YYYY-MM-DD'),
+        shiftDates: shiftDatesArr,
+        shiftDate: shiftDatesArr[0],
         startTime: values.startTime.format('HH:mm'),
         endTime: values.endTime.format('HH:mm'),
         requiredCount: values.requiredCount,
@@ -151,12 +203,12 @@ export function UrgentShiftPage() {
         message.success('更新成功');
       } else {
         await createUrgentShift(payload, currentUser?.id || '');
-        message.success('创建成功');
+        message.success(`已创建紧急班次（覆盖 ${shiftDatesArr.length} 天）`);
       }
       setModalOpen(false);
       loadShifts();
     } catch (err: any) {
-      if (err?.errorFields) return; // form validation
+      if (err?.errorFields) return;
       message.error(getErrorMessage(err, '保存失败'));
     }
   };
@@ -170,7 +222,7 @@ export function UrgentShiftPage() {
     try {
       const [signupData, eligibleData] = await Promise.all([
         listSignups(record.id),
-        findEligibleEmployees(record.shiftDate, record.startTime, record.endTime, record.skillId),
+        findEligibleEmployees(record.shiftDates || [record.shiftDate], record.startTime, record.endTime, record.skillId, record.projectId),
       ]);
       setSignups(signupData);
       // 构建员工ID -> 用工规则警告的映射
@@ -210,7 +262,7 @@ export function UrgentShiftPage() {
     setSelectedEmpIds([]);
     try {
       const data = await findEligibleEmployees(
-        record.shiftDate, record.startTime, record.endTime, record.skillId,
+        record.shiftDates || [record.shiftDate], record.startTime, record.endTime, record.skillId, record.projectId,
       );
       setEligibleEmployees(data);
     } catch (err) {
@@ -274,14 +326,27 @@ export function UrgentShiftPage() {
     },
     {
       title: '日期 / 时间', width: 200,
-      render: (_: any, record: UrgentShiftRecord) => (
-        <div>
-          <div style={{ fontWeight: 600 }}>{record.shiftDate}</div>
-          <div style={{ fontSize: 12, color: '#666' }}>
-            {record.startTime?.slice(0, 5)} - {record.endTime?.slice(0, 5)}
+      render: (_: any, record: UrgentShiftRecord) => {
+        const dates = record.shiftDates || [record.shiftDate];
+        return (
+          <div>
+            <div style={{ fontWeight: 600 }}>
+              {dates.length === 1
+                ? dates[0]
+                : <>{dates[0]} <Tag style={{ fontSize: 10 }}>等{dates.length}天</Tag></>
+              }
+            </div>
+            {dates.length > 1 && (
+              <Tooltip title={dates.join('、')}>
+                <div style={{ fontSize: 11, color: '#999', cursor: 'pointer' }}>{dates.slice(1).join('、')}</div>
+              </Tooltip>
+            )}
+            <div style={{ fontSize: 12, color: '#666' }}>
+              {record.startTime?.slice(0, 5)} - {record.endTime?.slice(0, 5)}
+            </div>
           </div>
-        </div>
-      ),
+        );
+      },
     },
     {
       title: '项目', dataIndex: 'projectName', width: 140,
@@ -374,9 +439,63 @@ export function UrgentShiftPage() {
         type="info" showIcon closable style={{ marginBottom: 16 }}
       />
 
+      {/* Stats Cards */}
+      <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+        {[
+          { label: '开放中', value: stats.openCount, color: '#52c41a', bg: '#f6ffed', border: '#b7eb8f' },
+          { label: '已满额', value: stats.fulfilledCount, color: '#1677ff', bg: '#f0f5ff', border: '#adc6ff' },
+          { label: '已关闭', value: stats.closedCount, color: '#999', bg: '#fafafa', border: '#e8e8e8' },
+          { label: '总报名', value: stats.totalSignups, color: '#fa8c16', bg: '#fff7e6', border: '#ffd591' },
+        ].map(item => (
+          <div key={item.label} style={{
+            flex: '1 1 140px', maxWidth: 200, padding: '12px 16px',
+            background: item.bg, borderRadius: 10, border: `1px solid ${item.border}`,
+            display: 'flex', alignItems: 'center', gap: 12,
+          }}>
+            <div style={{ fontSize: 24, fontWeight: 700, color: item.color, lineHeight: 1 }}>{item.value}</div>
+            <div style={{ fontSize: 13, color: '#666' }}>{item.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Filters */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+        <Select
+          allowClear placeholder="按状态筛选" style={{ width: 140 }}
+          value={filterStatus} onChange={setFilterStatus}
+          options={[
+            { label: '开放中', value: 'open' },
+            { label: '已关闭', value: 'closed' },
+            { label: '已取消', value: 'cancelled' },
+          ]}
+        />
+        <Select
+          allowClear showSearch optionFilterProp="label"
+          placeholder="按项目筛选" style={{ width: 180 }}
+          value={filterProject} onChange={setFilterProject}
+          options={projects.map(p => ({ label: p.projectName, value: p.id }))}
+        />
+        <DatePicker.RangePicker
+          allowClear placeholder={['开始日期', '结束日期']}
+          style={{ width: 260 }}
+          value={filterDateRange}
+          onChange={(v) => setFilterDateRange(v as [dayjs.Dayjs, dayjs.Dayjs] | null)}
+        />
+        {hasFilter && (
+          <Button size="small" onClick={() => { setFilterStatus(undefined); setFilterProject(undefined); setFilterDateRange(null); }}>
+            清除筛选
+          </Button>
+        )}
+        {hasFilter && (
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            已筛选 {filteredShifts.length} / {shifts.length} 条
+          </Typography.Text>
+        )}
+      </div>
+
       {/* Table */}
       <Table
-        dataSource={shifts} columns={columns}
+        dataSource={filteredShifts} columns={columns}
         rowKey="id" loading={loading}
         pagination={{ pageSize: 10 }}
         scroll={{ x: 1200 }}
@@ -396,8 +515,8 @@ export function UrgentShiftPage() {
             <Select options={SHIFT_TYPES.map(t => ({ label: t, value: t }))} />
           </Form.Item>
           <Space style={{ width: '100%' }} size={16}>
-            <Form.Item name="shiftDate" label="排班日期" rules={[{ required: true, message: '请选择日期' }]} style={{ flex: 1 }}>
-              <DatePicker style={{ width: '100%' }} />
+            <Form.Item name="shiftDates" label="排班日期（可多选）" rules={[{ required: true, message: '请至少选择一个日期' }]} style={{ flex: 1 }}>
+              <DatePicker multiple maxTagCount="responsive" style={{ width: '100%' }} />
             </Form.Item>
             <Form.Item name="startTime" label="开始时间" rules={[{ required: true, message: '请选择' }]}>
               <TimePicker format="HH:mm" minuteStep={15} />
@@ -516,7 +635,7 @@ export function UrgentShiftPage() {
             <span>符合条件的员工</span>
             {eligibleShift && (
               <span style={{ fontSize: 13, color: '#999' }}>
-                {eligibleShift.shiftDate} {eligibleShift.startTime?.slice(0, 5)}-{eligibleShift.endTime?.slice(0, 5)}
+                {(eligibleShift.shiftDates || [eligibleShift.shiftDate]).join('、')} {eligibleShift.startTime?.slice(0, 5)}-{eligibleShift.endTime?.slice(0, 5)}
               </span>
             )}
           </div>

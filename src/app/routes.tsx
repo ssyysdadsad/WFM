@@ -21,6 +21,7 @@ import { LoginPage } from './components/auth/LoginPage';
 import { ProtectedRoute } from './components/auth/ProtectedRoute';
 import { AccountPermissionPage } from './components/pages/AccountPermissionPage';
 import { UrgentShiftPage } from './components/pages/UrgentShiftPage';
+import { ScheduleCodePage } from './components/pages/ScheduleCodePage';
 
 function ProtectedAppLayout() {
   return (
@@ -52,6 +53,7 @@ export const router = createBrowserRouter([
       { path: 'labor-rule', Component: LaborRulePage },
       { path: 'schedule-version', Component: ScheduleVersionPage },
       { path: 'schedule', Component: ScheduleMatrixPage },
+      { path: 'schedule-code', Component: ScheduleCodePage },
       { path: 'schedule/employee/:employeeId', Component: EmployeeScheduleDetailPage },
       { path: 'shift-change', Component: ShiftChangePage },
       { path: 'report', Component: ReportPage },

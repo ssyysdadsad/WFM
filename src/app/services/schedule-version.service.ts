@@ -28,6 +28,8 @@ function mapScheduleVersion(row: any): ScheduleVersionRecord {
     publishedByUserAccountId: row.published_by_user_account_id,
     remark: row.remark,
     isActive: row.is_active ?? false,
+    status: row.status ?? 'draft',
+    parentVersionId: row.parent_version_id ?? null,
   };
 }
 
@@ -263,3 +265,145 @@ export async function restoreScheduleVersion(versionId: string) {
   }
 }
 
+/** 从激活版本创建草稿副本（复制所有排班数据） */
+export async function createDraftFromActive(activeVersionId: string, operatorUserAccountId?: string, operatorName?: string) {
+  // 1. 查询源版本信息
+  const { data: sourceRows, error: sourceError } = await supabase
+    .from('schedule_version')
+    .select('*')
+    .eq('id', activeVersionId)
+    .limit(1);
+
+  if (sourceError || !sourceRows?.[0]) {
+    throw toAppError(sourceError || new Error('未找到源版本'), '创建草稿失败');
+  }
+
+  const source = sourceRows[0];
+
+  // 2. 检查是否已有该项目该月份的草稿版本
+  const { data: existingDrafts } = await supabase
+    .from('schedule_version')
+    .select('id')
+    .eq('project_id', source.project_id)
+    .eq('schedule_month', source.schedule_month)
+    .eq('status', 'draft')
+    .limit(1);
+
+  if (existingDrafts && existingDrafts.length > 0) {
+    // 已有草稿，直接返回该草稿ID
+    return existingDrafts[0].id as string;
+  }
+
+  // 3. 获取下一个版本号
+  const nextNo = await getNextVersionNo(source.project_id, source.schedule_month);
+
+  // 4. 查询草稿状态字典项
+  const { data: dictItems } = await supabase
+    .from('dict_item')
+    .select('id, item_code')
+    .eq('item_code', 'draft');
+  const draftStatusId = dictItems?.[0]?.id || null;
+
+  // 5. 创建新版本记录
+  const { data: newVersion, error: createError } = await supabase
+    .from('schedule_version')
+    .insert({
+      project_id: source.project_id,
+      schedule_month: source.schedule_month,
+      version_no: nextNo,
+      generation_type: 'manual',
+      publish_status_dict_item_id: draftStatusId,
+      created_by_user_account_id: operatorUserAccountId ?? source.created_by_user_account_id,
+      remark: `基于 v${source.version_no} 由 ${operatorName || '管理员'} 修改`,
+      is_active: false,
+      status: 'draft',
+      parent_version_id: activeVersionId,
+    })
+    .select('id')
+    .single();
+
+  if (createError || !newVersion) {
+    throw toAppError(createError || new Error('创建版本记录失败'), '创建草稿失败');
+  }
+
+  // 6. 批量复制排班数据
+  const { data: scheduleRows, error: fetchError } = await supabase
+    .from('schedule')
+    .select('employee_id, department_id, project_id, task_id, device_id, schedule_date, shift_type_dict_item_id, schedule_code_dict_item_id, planned_hours, source_type, remark, sort_order')
+    .eq('schedule_version_id', activeVersionId);
+
+  if (fetchError) {
+    throw toAppError(fetchError, '复制排班数据失败');
+  }
+
+  if (scheduleRows && scheduleRows.length > 0) {
+    // 分批插入（每批500条）
+    const batchSize = 500;
+    for (let i = 0; i < scheduleRows.length; i += batchSize) {
+      const batch = scheduleRows.slice(i, i + batchSize).map((row: any) => ({
+        ...row,
+        schedule_version_id: newVersion.id,
+      }));
+      const { error: insertError } = await supabase.from('schedule').insert(batch);
+      if (insertError) {
+        throw toAppError(insertError, '复制排班数据失败');
+      }
+    }
+  }
+
+  return newVersion.id as string;
+}
+
+/** 发布草稿版本（草稿→active，旧active→archived） */
+export async function publishDraft(draftVersionId: string, operatorUserAccountId?: string) {
+  // 1. 查询草稿版本信息
+  const { data: draftRows, error: draftError } = await supabase
+    .from('schedule_version')
+    .select('*')
+    .eq('id', draftVersionId)
+    .limit(1);
+
+  if (draftError || !draftRows?.[0]) {
+    throw toAppError(draftError || new Error('未找到草稿版本'), '发布草稿失败');
+  }
+
+  const draft = draftRows[0];
+
+  if (draft.status !== 'draft') {
+    throw new AppError('只能发布状态为草稿的版本', 'INVALID_STATUS');
+  }
+
+  // 2. 将同项目同月份旧 active 版本归档
+  await supabase
+    .from('schedule_version')
+    .update({ is_active: false, status: 'archived' })
+    .eq('project_id', draft.project_id)
+    .eq('schedule_month', draft.schedule_month)
+    .eq('status', 'active');
+
+  // 3. 查询发布状态字典项
+  const { data: dictItems } = await supabase
+    .from('dict_item')
+    .select('id, item_code')
+    .eq('item_code', 'published');
+  const publishedStatusId = dictItems?.[0]?.id || null;
+
+  // 4. 将草稿设为 active
+  const publishedAt = new Date().toISOString();
+  const { error: publishError } = await supabase
+    .from('schedule_version')
+    .update({
+      status: 'active',
+      is_active: true,
+      published_at: publishedAt,
+      published_by_user_account_id: operatorUserAccountId ?? null,
+      publish_status_dict_item_id: publishedStatusId,
+    })
+    .eq('id', draftVersionId);
+
+  if (publishError) {
+    throw toAppError(publishError, '发布草稿失败');
+  }
+
+  return { success: true, publishedAt };
+}

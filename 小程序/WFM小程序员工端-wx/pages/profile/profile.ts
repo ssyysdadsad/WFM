@@ -7,6 +7,7 @@ Page({
     loading: true,
     employee: {} as any,
     workAge: '—',
+    skills: [] as any[],
   },
 
   onShow() {
@@ -34,18 +35,29 @@ Page({
           } catch (_) {}
         }
 
-        // Get primary skill
+        // Get all skills
         let position = ''
+        const skillList: any[] = []
         try {
-          const skills: any[] = await query('employee_skill',
-            `employee_id=eq.${emp.id}&is_primary=eq.true&select=skill_id,skill_level&limit=1`
+          const empSkills: any[] = await query('employee_skill',
+            `employee_id=eq.${emp.id}&select=skill_id,skill_level,is_primary&order=is_primary.desc`
           )
-          if (skills && skills.length > 0) {
-            const sk: any[] = await query('skill', `id=eq.${skills[0].skill_id}&select=skill_name&limit=1`)
+          if (empSkills && empSkills.length > 0) {
             const lvMap: Record<number, string> = { 1: '初级', 2: '中级', 3: '高级' }
-            position = sk?.[0]?.skill_name ? `${sk[0].skill_name} · ${lvMap[skills[0].skill_level] || ''}` : ''
+            for (const es of empSkills) {
+              try {
+                const sk: any[] = await query('skill', `id=eq.${es.skill_id}&select=skill_name&limit=1`)
+                const name = sk?.[0]?.skill_name || '未知技能'
+                const level = lvMap[es.skill_level] || ''
+                skillList.push({ name, level, isPrimary: !!es.is_primary })
+                if (es.is_primary) {
+                  position = `${name} · ${level}`
+                }
+              } catch (_) {}
+            }
           }
         } catch (_) {}
+        this.setData({ skills: skillList })
 
         const updated = {
           ...emp,

@@ -1,7 +1,59 @@
 .profile-page { min-height: 100vh; }
 .prof-header { position: relative; }
-.prof-header-title { display: block; text-align: center; font-size: 34rpx; font-weight: 700; color: #fff; margin-bottom: 40rpx; position: relative; z-index: 10; }
-.prof-avatar { width: 112rpx; height: 112rpx; border-radius: 50%; background: rgba(255,255,255,0.25); display: flex; align-items: center; justify-content: center; font-size: 40rpx; border: 4rpx solid rgba(255,255,255,0.3); flex-shrink: 0; }
-.prof-name { display: block; font-size: 36rpx; font-weight: 700; color: #fff; }
-.prof-sub { display: block; font-size: 24rpx; color: rgba(255,255,255,0.75); margin-top: 4rpx; }
+.prof-header-title { display: block; text-align: center; font-size: 34rpx; font-weight: 700; color: #fff; margin-bottom: 40rpx; position: relative; z-index: 10; letter-spacing: 2rpx; }
+.prof-avatar { width: 120rpx; height: 120rpx; border-radius: 50%; background: rgba(255,255,255,0.18); display: flex; align-items: center; justify-content: center; font-size: 44rpx; border: 3rpx solid rgba(255,255,255,0.25); flex-shrink: 0; backdrop-filter: blur(8px); box-shadow: 0 4rpx 20rpx rgba(0,0,0,0.06); }
+.prof-name { display: block; font-size: 38rpx; font-weight: 800; color: #fff; letter-spacing: 1rpx; }
+.prof-sub { display: block; font-size: 24rpx; color: rgba(255,255,255,0.7); margin-top: 6rpx; }
 .prof-content { padding: 24rpx; margin-top: -24rpx; }
+
+/* --- Green card --- */
+.card-green {
+  box-shadow: 0 2rpx 16rpx rgba(16,185,129,0.06), 0 8rpx 32rpx rgba(16,185,129,0.04);
+  border-color: rgba(209,245,228,0.5);
+}
+
+/* --- Skill list --- */
+.skill-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16rpx;
+  padding: 12rpx 32rpx 28rpx;
+}
+.skill-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 8rpx;
+  padding: 16rpx 26rpx;
+  border-radius: 18rpx;
+  background: rgba(242,245,249,0.8);
+  border: 2rpx solid rgba(224,232,240,0.5);
+  backdrop-filter: blur(8px);
+}
+.skill-tag.skill-primary {
+  background: linear-gradient(135deg, rgba(235,244,255,0.9) 0%, rgba(216,234,255,0.9) 100%);
+  border-color: rgba(179,212,255,0.5);
+  box-shadow: 0 2rpx 12rpx rgba(59,139,242,0.08);
+}
+.skill-star {
+  font-size: 24rpx;
+}
+.skill-name {
+  font-size: 26rpx;
+  font-weight: 600;
+  color: #1A2233;
+}
+.skill-level {
+  font-size: 20rpx;
+  font-weight: 500;
+  color: #5A7A9A;
+  background: rgba(255,255,255,0.6);
+  padding: 4rpx 14rpx;
+  border-radius: 10rpx;
+}
+.skill-tag.skill-primary .skill-name {
+  color: #1E6FD9;
+}
+.skill-tag.skill-primary .skill-level {
+  color: #3B8BF2;
+  background: rgba(59,139,242,0.1);
+}

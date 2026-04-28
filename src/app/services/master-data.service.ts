@@ -139,6 +139,26 @@ export async function loadCrudForeignOptions(columns: ForeignColumnConfig[]) {
       let query = supabase.from(column.foreignTable!);
       const labelField = column.foreignLabel || 'id';
       
+      // 管理员账号：只加载拥有 admin/manager 角色的启用账号
+      if (column.foreignTable === 'user_account') {
+        const { data: roleData } = await supabase
+          .from('user_role')
+          .select('user_account_id, role!inner(role_code)')
+          .in('role.role_code', ['admin', 'manager']);
+        const adminIds = [...new Set((roleData || []).map((r: any) => r.user_account_id))];
+        if (adminIds.length > 0) {
+          const { data } = await supabase
+            .from('user_account')
+            .select(`id, ${labelField}`)
+            .in('id', adminIds)
+            .eq('is_enabled', true);
+          results[column.key] = data || [];
+        } else {
+          results[column.key] = [];
+        }
+        return;
+      }
+
       if (column.foreignTable === 'dict_item' && column.dictType) {
         query = query.select(`id, ${labelField}, dict_type!inner(type_code)`).eq('dict_type.type_code', column.dictType);
       } else if (column.foreignTable === 'project') {

@@ -6,6 +6,7 @@ import {
   CoffeeOutlined, ReloadOutlined, TrophyOutlined, ApartmentOutlined,
   DownloadOutlined,
 } from '@ant-design/icons';
+import { useNavigate } from 'react-router';
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, PieChart, Pie, Cell, Legend, RadarChart, Radar,
@@ -16,8 +17,10 @@ import {
   getScheduleOverviewReport,
   getTaskCompletionReport,
   getDeviceUsageReport,
+  getAttendanceSummary,
 } from '@/app/services/report.service';
-import type { ScheduleOverviewData } from '@/app/services/report.service';
+import { supabase } from '@/app/components/supabase';
+import type { ScheduleOverviewData, AttendanceSummaryRow } from '@/app/services/report.service';
 import type { TaskCompletionReportRow, DeviceUsageReportRow } from '@/app/types/report';
 
 const GRADIENT_CARDS = [
@@ -69,24 +72,45 @@ function CustomTooltip({ active, payload, label }: any) {
 }
 
 export function ReportPage() {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [overview, setOverview] = useState<ScheduleOverviewData | null>(null);
   const [taskRows, setTaskRows] = useState<TaskCompletionReportRow[]>([]);
   const [deviceRows, setDeviceRows] = useState<DeviceUsageReportRow[]>([]);
+  const [attendanceRows, setAttendanceRows] = useState<AttendanceSummaryRow[]>([]);
 
-  useEffect(() => { loadData(); }, []);
+  // 筛选
+  const [filterProject, setFilterProject] = useState<string | undefined>();
+  const [filterMonth, setFilterMonth] = useState<dayjs.Dayjs | null>(null);
+  const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
 
-  async function loadData() {
+  useEffect(() => {
+    loadProjects();
+    loadData();
+  }, []);
+
+  async function loadProjects() {
+    const { data } = await supabase.from('project').select('id, project_name').order('project_name');
+    setProjects((data || []).map((p: any) => ({ id: p.id, name: p.project_name })));
+  }
+
+  async function loadData(projectId?: string, month?: dayjs.Dayjs | null) {
     setLoading(true);
     try {
-      const [ov, tasks, devices] = await Promise.all([
-        getScheduleOverviewReport(),
+      const opts: { projectId?: string; month?: string } = {};
+      if (projectId) opts.projectId = projectId;
+      if (month) opts.month = month.format('YYYY-MM');
+
+      const [ov, tasks, devices, attendance] = await Promise.all([
+        getScheduleOverviewReport(Object.keys(opts).length > 0 ? opts : undefined),
         getTaskCompletionReport(),
         getDeviceUsageReport(),
+        getAttendanceSummary(Object.keys(opts).length > 0 ? opts : undefined),
       ]);
       setOverview(ov);
       setTaskRows(tasks);
       setDeviceRows(devices);
+      setAttendanceRows(attendance);
     } catch (error) {
       message.error(getErrorMessage(error, '加载报表失败'));
     } finally {
@@ -134,7 +158,7 @@ export function ReportPage() {
   return (
     <div style={{ minHeight: '100vh' }}>
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
         <div>
           <Typography.Title level={4} style={{ margin: 0, fontWeight: 700 }}>📊 统计报表</Typography.Title>
           <Typography.Text type="secondary" style={{ fontSize: 13 }}>基于当前激活排班版本的数据统计与分析</Typography.Text>
@@ -162,7 +186,7 @@ export function ReportPage() {
             }}
           >导出报表</Button>
           <button
-            onClick={loadData}
+            onClick={() => loadData(filterProject, filterMonth)}
             style={{
               background: 'linear-gradient(135deg, #667eea, #764ba2)', color: '#fff',
               border: 'none', borderRadius: 12, padding: '10px 24px', cursor: 'pointer',
@@ -173,6 +197,35 @@ export function ReportPage() {
             <ReloadOutlined /> 刷新数据
           </button>
         </Space>
+      </div>
+
+      {/* Filters */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
+        <Select
+          allowClear showSearch optionFilterProp="label"
+          placeholder="按项目筛选" style={{ width: 200 }}
+          value={filterProject}
+          onChange={(v) => { setFilterProject(v); loadData(v, filterMonth); }}
+          options={projects.map(p => ({ label: p.name, value: p.id }))}
+        />
+        <DatePicker
+          picker="month" allowClear
+          placeholder="按月份筛选" style={{ width: 160 }}
+          value={filterMonth}
+          onChange={(v) => { setFilterMonth(v); loadData(filterProject, v); }}
+        />
+        {(filterProject || filterMonth) && (
+          <Button size="small" onClick={() => { setFilterProject(undefined); setFilterMonth(null); loadData(); }}>
+            清除筛选
+          </Button>
+        )}
+        {(filterProject || filterMonth) && (
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            {filterProject ? `项目: ${projects.find(p => p.id === filterProject)?.name || ''}` : ''}
+            {filterProject && filterMonth ? ' · ' : ''}
+            {filterMonth ? `月份: ${filterMonth.format('YYYY-MM')}` : ''}
+          </Typography.Text>
+        )}
       </div>
 
       {/* Stat Cards */}
@@ -460,6 +513,103 @@ export function ReportPage() {
                   )}
                 </Card>
               </>
+            ),
+          },
+          {
+            key: 'attendance',
+            label: <span><TeamOutlined /> 员工出勤汇总</span>,
+            children: (
+              <Card
+                title={<span style={{ fontWeight: 600 }}>📋 员工出勤汇总</span>}
+                extra={
+                  <Button
+                    size="small" icon={<DownloadOutlined />}
+                    onClick={() => {
+                      try {
+                        const headers = ['工号', '姓名', '部门', '项目', '出勤天数', '休息天数', '请假天数', '总工时(h)', '日均工时(h)'];
+                        const rows = attendanceRows.map(r => [r.employeeNo, r.employeeName, r.departmentName, r.projectName, r.workDays, r.restDays, r.leaveDays, r.totalHours, r.avgDailyHours].join(','));
+                        const csv = '\uFEFF' + [headers.join(','), ...rows].join('\n');
+                        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                        const a = document.createElement('a');
+                        a.href = URL.createObjectURL(blob);
+                        a.download = `员工出勤汇总_${dayjs().format('YYYY-MM-DD')}.csv`;
+                        a.click();
+                        message.success('导出成功');
+                      } catch { message.error('导出失败'); }
+                    }}
+                  >导出 CSV</Button>
+                }
+                style={cardStyle}
+                bodyStyle={{ padding: 0 }}
+              >
+                {attendanceRows.length > 0 ? (
+                  <Table
+                    rowKey="employeeId"
+                    dataSource={attendanceRows}
+                    size="middle"
+                    pagination={{ pageSize: 15, showSizeChanger: true, pageSizeOptions: ['15', '30', '50'], showTotal: total => `共 ${total} 人` }}
+                    columns={[
+                      { title: '工号', dataIndex: 'employeeNo', width: 100, render: (v: string) => <Typography.Text code style={{ fontSize: 12 }}>{v}</Typography.Text> },
+                      { title: '姓名', dataIndex: 'employeeName', width: 100, render: (v: string, row: AttendanceSummaryRow) => (
+                        <a
+                          style={{ fontWeight: 600, color: '#1677ff', cursor: 'pointer' }}
+                          onClick={() => {
+                            const params = new URLSearchParams();
+                            if (filterProject) params.set('projectId', filterProject);
+                            if (filterMonth) params.set('month', filterMonth.format('YYYY-MM'));
+                            navigate(`/schedule/employee/${row.employeeId}?${params.toString()}`);
+                          }}
+                        >
+                          {v}
+                        </a>
+                      ) },
+                      { title: '部门', dataIndex: 'departmentName', width: 100 },
+                      { title: '项目', dataIndex: 'projectName', width: 100 },
+                      {
+                        title: '出勤', dataIndex: 'workDays', width: 80, sorter: (a: AttendanceSummaryRow, b: AttendanceSummaryRow) => a.workDays - b.workDays,
+                        render: (v: number) => <Tag color="green">{v}天</Tag>,
+                      },
+                      {
+                        title: '休息', dataIndex: 'restDays', width: 80, sorter: (a: AttendanceSummaryRow, b: AttendanceSummaryRow) => a.restDays - b.restDays,
+                        render: (v: number) => <Tag color="blue">{v}天</Tag>,
+                      },
+                      {
+                        title: '请假', dataIndex: 'leaveDays', width: 80, sorter: (a: AttendanceSummaryRow, b: AttendanceSummaryRow) => a.leaveDays - b.leaveDays,
+                        render: (v: number) => v > 0 ? <Tag color="orange">{v}天</Tag> : <span style={{ color: '#ccc' }}>0</span>,
+                      },
+                      {
+                        title: '总工时', dataIndex: 'totalHours', width: 100, sorter: (a: AttendanceSummaryRow, b: AttendanceSummaryRow) => a.totalHours - b.totalHours,
+                        defaultSortOrder: 'descend' as const,
+                        render: (v: number) => <span style={{ fontWeight: 700, color: '#8B5CF6', fontSize: 15 }}>{v}h</span>,
+                      },
+                      {
+                        title: '日均工时', dataIndex: 'avgDailyHours', width: 100, sorter: (a: AttendanceSummaryRow, b: AttendanceSummaryRow) => a.avgDailyHours - b.avgDailyHours,
+                        render: (v: number) => <span style={{ color: '#3B82F6' }}>{v}h</span>,
+                      },
+                      {
+                        title: '完成进度', key: 'bar', width: 180,
+                        render: (_: unknown, row: AttendanceSummaryRow) => {
+                          const pct = row.totalHours > 0 ? Math.round((row.completedHours / row.totalHours) * 100) : 0;
+                          const color = pct >= 100 ? '#10B981' : pct >= 80 ? '#3B82F6' : '#F59E0B';
+                          return (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <Progress
+                                percent={pct}
+                                size="small"
+                                strokeColor={color}
+                                format={() => `${row.completedHours}/${row.totalHours}h`}
+                                style={{ flex: 1 }}
+                              />
+                            </div>
+                          );
+                        },
+                      },
+                    ]}
+                  />
+                ) : (
+                  <div style={{ textAlign: 'center', padding: 60, color: '#9ca3af' }}>暂无出勤数据</div>
+                )}
+              </Card>
             ),
           },
         ]}

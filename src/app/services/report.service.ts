@@ -225,15 +225,31 @@ export type ScheduleOverviewData = {
 // 动态颜色：从字典项 extra_config.color 获取，无需硬编码
 const FALLBACK_COLORS = ['#3B82F6', '#8B5CF6', '#F59E0B', '#10B981', '#EC4899', '#06B6D4', '#F97316', '#64748B'];
 
-export async function getScheduleOverviewReport(): Promise<ScheduleOverviewData> {
-  const { data: versions } = await supabase.from('schedule_version').select('id').eq('is_active', true).limit(1);
-  const activeVersionId = versions?.[0]?.id;
-  if (!activeVersionId) {
+export async function getScheduleOverviewReport(opts?: { projectId?: string; month?: string }): Promise<ScheduleOverviewData> {
+  // 查询激活版本，可按项目筛选
+  let versionQuery = supabase.from('schedule_version').select('id, project_id').eq('is_active', true);
+  if (opts?.projectId) {
+    versionQuery = versionQuery.eq('project_id', opts.projectId);
+  }
+  const { data: versions } = await versionQuery;
+  const activeVersionIds = (versions || []).map((v: any) => v.id);
+  if (activeVersionIds.length === 0) {
     return { dailyTrend: [], shiftDistribution: [], deptHours: [], topEmployees: [], summary: { totalSchedules: 0, totalWorkDays: 0, totalRestDays: 0, totalHours: 0, avgDailyHours: 0 } };
   }
 
+  let scheduleQuery = supabase.from('schedule').select('id, employee_id, department_id, schedule_date, planned_hours, schedule_code_dict_item_id').in('schedule_version_id', activeVersionIds);
+  // 按月份筛选
+  if (opts?.month) {
+    const monthStart = opts.month + '-01';
+    const [y, m] = opts.month.split('-').map(Number);
+    const nm = m === 12 ? 1 : m + 1;
+    const ny = m === 12 ? y + 1 : y;
+    const nextMonth = `${ny}-${String(nm).padStart(2, '0')}-01`;
+    scheduleQuery = scheduleQuery.gte('schedule_date', monthStart).lt('schedule_date', nextMonth);
+  }
+
   const [scheduleRes, dictRes, deptRes, empRes] = await Promise.all([
-    supabase.from('schedule').select('id, employee_id, department_id, schedule_date, planned_hours, schedule_code_dict_item_id').eq('schedule_version_id', activeVersionId),
+    scheduleQuery,
     supabase.from('dict_item').select('id, item_name, extra_config'),
     supabase.from('department').select('id, department_name'),
     supabase.from('employee').select('id, full_name, department_id'),
@@ -262,7 +278,7 @@ export async function getScheduleOverviewReport(): Promise<ScheduleOverviewData>
     const codeName = dictItem?.item_name || '?';
     const category = dictItem?.extra_config?.category || 'work';
     const isWork = category === 'work';
-    const hours = Number(row.planned_hours || 0);
+    const hours = Number(dictItem?.extra_config?.standard_hours || row.planned_hours || 0);
 
     // Daily
     const d = dailyMap.get(row.schedule_date) || { work: 0, rest: 0, hours: 0 };
@@ -384,6 +400,103 @@ export async function getDeviceUsageReport() {
   });
 }
 
+// ====== Employee Attendance Summary ======
+
+export type AttendanceSummaryRow = {
+  employeeId: string;
+  employeeName: string;
+  employeeNo: string;
+  departmentName: string;
+  workDays: number;
+  restDays: number;
+  leaveDays: number;
+  totalHours: number;
+  completedHours: number;
+  avgDailyHours: number;
+  projectName: string;
+};
+
+export async function getAttendanceSummary(opts?: { projectId?: string; month?: string }): Promise<AttendanceSummaryRow[]> {
+  // Get active versions (optionally filtered by project)
+  let versionQuery = supabase.from('schedule_version').select('id, project_id, project:project_id(project_name)').eq('is_active', true);
+  if (opts?.projectId) {
+    versionQuery = versionQuery.eq('project_id', opts.projectId);
+  }
+  const { data: versions } = await versionQuery;
+  if (!versions?.length) return [];
+
+  const versionIds = versions.map((v: any) => v.id);
+  const versionProjectMap = new Map(versions.map((v: any) => [v.id, v.project?.project_name || '-']));
+
+  let scheduleQuery = supabase
+    .from('schedule')
+    .select('employee_id, schedule_version_id, schedule_date, planned_hours, schedule_code_dict_item_id')
+    .in('schedule_version_id', versionIds);
+
+  // Optional month filter
+  if (opts?.month) {
+    const monthStart = opts.month + '-01';
+    const [y, m] = opts.month.split('-').map(Number);
+    const nm = m === 12 ? 1 : m + 1;
+    const ny = m === 12 ? y + 1 : y;
+    const nextMonth = `${ny}-${String(nm).padStart(2, '0')}-01`;
+    scheduleQuery = scheduleQuery.gte('schedule_date', monthStart).lt('schedule_date', nextMonth);
+  }
+
+  const [scheduleRes, empRes, dictRes] = await Promise.all([
+    scheduleQuery,
+    supabase.from('employee').select('id, full_name, employee_no, department:department_id(department_name)'),
+    supabase.from('dict_item').select('id, item_name, extra_config'),
+  ]);
+
+  if (scheduleRes.error) throw toAppError(scheduleRes.error, '加载出勤汇总失败');
+
+  const empMap = new Map((empRes.data || []).map((e: any) => [e.id, e]));
+  const dictMap = new Map((dictRes.data || []).map((d: any) => [d.id, d]));
+
+  // Group by employee
+  const todayStr = new Date().toISOString().split('T')[0];
+  const byEmp = new Map<string, { work: number; rest: number; leave: number; hours: number; completedHours: number; versionId: string }>();
+  (scheduleRes.data || []).forEach((s: any) => {
+    const dictItem = dictMap.get(s.schedule_code_dict_item_id);
+    const category = dictItem?.extra_config?.category || 'work';
+    const hours = Number(dictItem?.extra_config?.standard_hours || s.planned_hours || 0);
+
+    const existing = byEmp.get(s.employee_id) || { work: 0, rest: 0, leave: 0, hours: 0, completedHours: 0, versionId: s.schedule_version_id };
+    if (category === 'work') {
+      existing.work++;
+      existing.hours += hours;
+      // 已过去日期（含今天）算已完成工时
+      if (s.schedule_date <= todayStr) {
+        existing.completedHours += hours;
+      }
+    }
+    else if (category === 'leave') { existing.leave++; }
+    else { existing.rest++; }
+    byEmp.set(s.employee_id, existing);
+  });
+
+  const result: AttendanceSummaryRow[] = [];
+  for (const [empId, stats] of byEmp) {
+    const emp = empMap.get(empId);
+    result.push({
+      employeeId: empId,
+      employeeName: emp?.full_name || '-',
+      employeeNo: emp?.employee_no || '-',
+      departmentName: emp?.department?.department_name || '-',
+      workDays: stats.work,
+      restDays: stats.rest,
+      leaveDays: stats.leave,
+      totalHours: Number(stats.hours.toFixed(1)),
+      completedHours: Number(stats.completedHours.toFixed(1)),
+      avgDailyHours: stats.work > 0 ? Number((stats.hours / stats.work).toFixed(1)) : 0,
+      projectName: versionProjectMap.get(stats.versionId) || '-',
+    });
+  }
+
+  return result.sort((a, b) => b.totalHours - a.totalHours);
+}
+
 // ====== Today Employee Status ======
 
 export type TodayEmployeeRow = {
@@ -462,7 +575,7 @@ export async function getTodayEmployeeStatus(projectId?: string, date?: string):
       departmentName: emp.department?.department_name || '-',
       scheduleCodeName: schedule?.codeName || null,
       category: schedule?.category || null,
-      plannedHours: schedule ? Number(schedule.planned_hours || 0) : 0,
+      plannedHours: schedule ? Number(dictMap.get(schedule.schedule_code_dict_item_id)?.extra_config?.standard_hours || schedule.planned_hours || 0) : 0,
       projectName: schedule?.projectInfo?.projectName || null,
       projectId: schedule?.projectInfo?.projectId || null,
     });

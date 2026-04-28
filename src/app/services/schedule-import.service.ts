@@ -265,9 +265,18 @@ export async function importScheduleExcel(params: {
       }),
     );
 
-    // Resolve planned hours directly from schedule_code extra_config
+    // Resolve planned hours: prefer computing from time range, then fall back to config
     function resolveImportHours(codeItem: any): number {
       const extra = codeItem?.extraConfig || {};
+      // 1. If start_time & end_time present, compute real duration
+      if (extra.start_time && extra.end_time && extra.start_time !== '00:00' && extra.end_time !== '00:00') {
+        const [sh, sm] = extra.start_time.split(':').map(Number);
+        const [eh, em] = extra.end_time.split(':').map(Number);
+        let mins = (eh * 60 + em) - (sh * 60 + sm);
+        if (mins <= 0) mins += 24 * 60; // overnight shift
+        return parseFloat((mins / 60).toFixed(1));
+      }
+      // 2. Fallback to configured values
       if (extra.planned_hours != null) return Number(extra.planned_hours);
       return Number(extra.standard_hours || 8);
     }

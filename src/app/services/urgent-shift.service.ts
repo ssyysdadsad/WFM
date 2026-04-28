@@ -16,6 +16,7 @@ function mapUrgentShift(row: any): UrgentShiftRecord {
     title: row.title,
     shiftType: row.shift_type,
     shiftDate: row.shift_date,
+    shiftDates: Array.isArray(row.shift_dates) ? row.shift_dates : (row.shift_dates ? JSON.parse(row.shift_dates) : [row.shift_date]),
     startTime: row.start_time,
     endTime: row.end_time,
     requiredCount: row.required_count,
@@ -91,10 +92,12 @@ export async function createUrgentShift(
   values: UrgentShiftFormValues,
   operatorId: string,
 ): Promise<void> {
+  const dates: string[] = values.shiftDates || (values.shiftDate ? [values.shiftDate] : []);
   const { error } = await supabase.from('urgent_shift').insert({
     title: values.title,
     shift_type: values.shiftType,
-    shift_date: values.shiftDate,
+    shift_date: dates[0] || null,
+    shift_dates: dates,
     start_time: values.startTime,
     end_time: values.endTime,
     required_count: values.requiredCount,
@@ -116,6 +119,10 @@ export async function updateUrgentShift(
   if (values.title !== undefined) updateData.title = values.title;
   if (values.shiftType !== undefined) updateData.shift_type = values.shiftType;
   if (values.shiftDate !== undefined) updateData.shift_date = values.shiftDate;
+  if ((values as any).shiftDates !== undefined) {
+    updateData.shift_dates = (values as any).shiftDates;
+    updateData.shift_date = (values as any).shiftDates[0] || null;
+  }
   if (values.startTime !== undefined) updateData.start_time = values.startTime;
   if (values.endTime !== undefined) updateData.end_time = values.endTime;
   if (values.requiredCount !== undefined) updateData.required_count = values.requiredCount;
@@ -149,17 +156,31 @@ export async function deleteUrgentShift(id: string): Promise<void> {
  * 6. Optionally highlight employees with matching skills
  */
 export async function findEligibleEmployees(
-  shiftDate: string,
+  shiftDates: string[],
   startTime: string,
   endTime: string,
   skillId?: string | null,
+  projectId?: string | null,
 ): Promise<EligibleEmployee[]> {
-  // 1. All employees
-  const { data: allEmployees, error: empErr } = await supabase
-    .from('employee')
-    .select('id, full_name, employee_no, department:department_id(department_name)')
-    .order('full_name');
-  if (empErr) throw toAppError(empErr, '查询员工失败');
+  if (shiftDates.length === 0) return [];
+  // 1. 获取员工列表：如果指定了项目，只查该项目下的活跃员工
+  let allEmployees: any[] = [];
+  if (projectId) {
+    const { data: projEmps, error: peErr } = await supabase
+      .from('project_employee')
+      .select('employee:employee_id(id, full_name, employee_no, department:department_id(department_name))')
+      .eq('project_id', projectId)
+      .eq('is_active', true);
+    if (peErr) throw toAppError(peErr, '查询项目员工失败');
+    allEmployees = (projEmps || []).map((pe: any) => pe.employee).filter(Boolean);
+  } else {
+    const { data: emps, error: empErr } = await supabase
+      .from('employee')
+      .select('id, full_name, employee_no, department:department_id(department_name)')
+      .order('full_name');
+    if (empErr) throw toAppError(empErr, '查询员工失败');
+    allEmployees = emps || [];
+  }
 
   // 2. Get schedule codes with time info
   const { data: dictTypes } = await supabase
@@ -193,21 +214,23 @@ export async function findEligibleEmployees(
     .eq('is_active', true);
   const activeVersionIds = (activeVersions || []).map((v: any) => v.id);
 
-  // 4. Get all schedules on the target date (only active versions)
+  // 4. Get all schedules on ALL target dates (only active versions)
   let schedOnDateQuery = supabase
     .from('schedule')
-    .select('employee_id, schedule_code_dict_item_id')
-    .eq('schedule_date', shiftDate);
+    .select('employee_id, schedule_code_dict_item_id, schedule_date')
+    .in('schedule_date', shiftDates);
   if (activeVersionIds.length > 0) {
     schedOnDateQuery = schedOnDateQuery.in('schedule_version_id', activeVersionIds);
   }
   const { data: schedulesOnDate } = await schedOnDateQuery;
 
-  // Build map: employee_id -> their schedule codes
-  const empScheduleMap = new Map<string, string[]>();
+  // Build map: employee_id -> date -> their schedule codes
+  const empDateScheduleMap = new Map<string, Map<string, string[]>>();
   (schedulesOnDate || []).forEach((s: any) => {
-    if (!empScheduleMap.has(s.employee_id)) empScheduleMap.set(s.employee_id, []);
-    empScheduleMap.get(s.employee_id)!.push(s.schedule_code_dict_item_id);
+    if (!empDateScheduleMap.has(s.employee_id)) empDateScheduleMap.set(s.employee_id, new Map());
+    const dateMap = empDateScheduleMap.get(s.employee_id)!;
+    if (!dateMap.has(s.schedule_date)) dateMap.set(s.schedule_date, []);
+    dateMap.get(s.schedule_date)!.push(s.schedule_code_dict_item_id);
   });
 
   // 4. Get employee skills
@@ -248,7 +271,8 @@ export async function findEligibleEmployees(
     .eq('is_enabled', true)
     .order('priority');
 
-  // 7. Get schedule data needed for labor rule checks (current week + month)
+  // 7. Get schedule data needed for labor rule checks (use first date for month/week range)
+  const shiftDate = shiftDates[0];
   const shiftDateObj = new Date(shiftDate);
   const monthStart = `${shiftDate.substring(0, 8)}01`;
   const monthEnd = new Date(shiftDateObj.getFullYear(), shiftDateObj.getMonth() + 1, 0);
@@ -392,19 +416,27 @@ export async function findEligibleEmployees(
     return warnings;
   }
 
-  // 9. Filter eligible employees
+  // 9. Filter eligible employees — 所有日期均无冲突才算合格
   const eligible: EligibleEmployee[] = [];
   (allEmployees || []).forEach((emp: any) => {
-    const codes = empScheduleMap.get(emp.id) || [];
-    const conflicting = codes.some(hasConflict);
-    if (conflicting) return; // Skip — has time overlap
+    const dateMap = empDateScheduleMap.get(emp.id);
+    let hasAnyConflict = false;
+    for (const d of shiftDates) {
+      const codes = dateMap?.get(d) || [];
+      if (codes.some(hasConflict)) {
+        hasAnyConflict = true;
+        break;
+      }
+    }
+    if (hasAnyConflict) return; // Skip
 
-    // Determine current shift description
+    // Determine current shift description (use first date)
+    const firstDateCodes = dateMap?.get(shiftDates[0]) || [];
     let currentShift: string | null = null;
-    if (codes.length === 0) {
-      currentShift = null; // No schedule
+    if (firstDateCodes.length === 0) {
+      currentShift = null;
     } else {
-      const firstCode = codeMap[codes[0]];
+      const firstCode = codeMap[firstDateCodes[0]];
       currentShift = firstCode?.category === 'rest' || firstCode?.category === 'leave' ? '休' : '有班次（不冲突）';
     }
 
@@ -530,20 +562,24 @@ export async function approveSignup(
     approved_at: new Date().toISOString(),
   }).eq('id', signupId);
 
-  // If approved, create/update schedule record
+  // If approved, create/update schedule records for ALL dates
   if (action === 'approve') {
     const shift = signup.urgent_shift;
-    await createOrUpdateScheduleForApproval(
-      signup.employee_id,
-      shift.shift_date,
-      shift.start_time,
-      shift.end_time,
-      shift.project_id,
-    );
+    const dates: string[] = Array.isArray(shift.shift_dates) ? shift.shift_dates : [shift.shift_date];
+    for (const d of dates) {
+      await createOrUpdateScheduleForApproval(
+        signup.employee_id,
+        d,
+        shift.start_time,
+        shift.end_time,
+        shift.project_id,
+      );
+    }
   }
 
   // Send result notification to employee
   const shift = signup.urgent_shift;
+  const shiftDatesStr = (Array.isArray(shift.shift_dates) ? shift.shift_dates : [shift.shift_date]).join('、');
   await supabase.from('employee_message').insert({
     employee_id: signup.employee_id,
     msg_type: 'urgent_shift',
@@ -551,8 +587,8 @@ export async function approveSignup(
       ? `报名通过：${shift.title}`
       : `报名未通过：${shift.title}`,
     content: action === 'approve'
-      ? `您报名的「${shift.title}」(${shift.shift_date} ${shift.start_time}-${shift.end_time}) 已通过审批，请按时出勤。`
-      : `您报名的「${shift.title}」(${shift.shift_date} ${shift.start_time}-${shift.end_time}) 未通过审批。${comment ? '原因：' + comment : ''}`,
+      ? `您报名的「${shift.title}」(${shiftDatesStr} ${shift.start_time}-${shift.end_time}) 已通过审批，请按时出勤。`
+      : `您报名的「${shift.title}」(${shiftDatesStr} ${shift.start_time}-${shift.end_time}) 未通过审批。${comment ? '原因：' + comment : ''}`,
     extra_data: { urgent_shift_id: shift.id },
   });
 }
@@ -703,8 +739,9 @@ export async function sendUrgentShiftNotifications(
   if (!shift) throw new AppError('未找到该紧急班次', 'NOT_FOUND');
 
   // Filter out employees with time conflicts before sending
+  const shiftDates: string[] = Array.isArray(shift.shift_dates) ? shift.shift_dates : [shift.shift_date];
   const eligible = await findEligibleEmployees(
-    shift.shift_date, shift.start_time, shift.end_time, shift.skill_id,
+    shiftDates, shift.start_time, shift.end_time, shift.skill_id, shift.project_id,
   );
   const eligibleIdSet = new Set(eligible.map(e => e.employeeId));
   const filteredIds = employeeIds.filter(id => eligibleIdSet.has(id));
@@ -715,7 +752,7 @@ export async function sendUrgentShiftNotifications(
     employee_id: eid,
     msg_type: 'urgent_shift',
     title: `紧急班次招募：${shift.title}`,
-    content: `${shift.shift_date} ${shift.start_time}-${shift.end_time}，${shift.project?.project_name || ''}项目需要人手，需求${shift.required_count}人，点击查看详情并报名。`,
+    content: `${shiftDates.join('、')} ${shift.start_time}-${shift.end_time}，${shift.project?.project_name || ''}项目需要人手，需求${shift.required_count}人，点击查看详情并报名。`,
     extra_data: { urgent_shift_id: shift.id },
     is_read: false,
   }));

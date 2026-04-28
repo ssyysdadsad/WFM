@@ -191,11 +191,12 @@ export function EmployeeScheduleDetailPage() {
 
       const versionIds = [...new Set(scheduleRows.map(r => r.schedule_version_id))];
 
-      // Step 2: Get version details
+      // Step 2: Get version details — only active versions
       const { data: versions } = await supabase
         .from('schedule_version')
-        .select('id, version_no, project_id')
-        .in('id', versionIds);
+        .select('id, version_no, project_id, is_active')
+        .in('id', versionIds)
+        .eq('is_active', true);
 
       if (!versions || versions.length === 0) {
         setProjectOptions([]);
@@ -580,7 +581,12 @@ export function EmployeeScheduleDetailPage() {
                 }}>
                   <span style={{ fontSize: 14, color: '#666' }}>本月总工时</span>
                   <span style={{ fontSize: 20, fontWeight: 700, color: '#45B7D1' }}>
-                    {schedules.reduce((sum, s) => sum + (Number(s.plannedHours) || 0), 0)}h
+                    {schedules.reduce((sum, s) => {
+                      const code = codeMap[s.scheduleCodeDictItemId];
+                      const hours = Number(code?.extraConfig?.standard_hours || s.plannedHours || 0);
+                      const cat = code?.extraConfig?.category;
+                      return sum + (cat === 'rest' || cat === 'leave' ? 0 : hours);
+                    }, 0)}h
                   </span>
                 </div>
               </>
@@ -716,7 +722,7 @@ export function EmployeeScheduleDetailPage() {
                             <div style={{ fontSize: 12 }}>
                               <div><b>{code.itemName || code.itemCode}</b></div>
                               {timeStr && <div>开始: {timeStr}</div>}
-                              <div>工时: {schedule.plannedHours ?? 0}h</div>
+                              <div>工时: {code?.extraConfig?.standard_hours ?? schedule.plannedHours ?? 0}h</div>
                             </div>
                           ) : null}
                           mouseEnterDelay={0.3}

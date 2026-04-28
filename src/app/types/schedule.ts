@@ -13,6 +13,8 @@ export type ScheduleVersionOption = {
   versionNo: number;
   scheduleMonth: string;
   generationType: string;
+  status?: 'draft' | 'active' | 'archived';
+  isActive?: boolean;
 };
 
 export type ScheduleDepartmentOption = {

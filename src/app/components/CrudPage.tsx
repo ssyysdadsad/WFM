@@ -85,6 +85,26 @@ export function CrudPage({ title, tableName, columns, defaultSort = 'created_at'
     const results: Record<string, any[]> = {};
     await Promise.all(
       foreignCols.map(async (col) => {
+        // 管理员账号：只加载拥有 admin/manager 角色的启用账号
+        if (col.foreignTable === 'user_account') {
+          const { data: roleData } = await supabase
+            .from('user_role')
+            .select('user_account_id, role!inner(role_code)')
+            .in('role.role_code', ['admin', 'manager']);
+          const adminIds = [...new Set((roleData || []).map((r: any) => r.user_account_id))];
+          if (adminIds.length > 0) {
+            const { data } = await supabase
+              .from('user_account')
+              .select(`id, ${col.foreignLabel || 'username'}`)
+              .in('id', adminIds)
+              .eq('is_enabled', true);
+            results[col.key] = data || [];
+          } else {
+            results[col.key] = [];
+          }
+          return;
+        }
+
         let query = supabase.from(col.foreignTable!);
         if (col.foreignTable === 'dict_item' && col.dictType) {
           query = query.select(`id, ${col.foreignLabel || 'id'}, dict_type!inner(type_code)`).eq('dict_type.type_code', col.dictType);

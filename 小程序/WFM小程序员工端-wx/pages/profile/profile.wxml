@@ -26,6 +26,20 @@
       <view class="info-row"><text class="label">联系方式</text><text class="value">{{employee.phone || '—'}}</text></view>
     </view>
 
+    <!-- 技能信息 -->
+    <view wx:if="{{skills.length > 0}}" class="card card-green" style="padding:0;">
+      <view class="section-title" style="padding:24rpx 32rpx 12rpx;">
+        <view class="bar bar-green"></view><text>技能信息</text>
+      </view>
+      <view class="skill-list">
+        <view wx:for="{{skills}}" wx:key="name" class="skill-tag {{item.isPrimary ? 'skill-primary' : ''}}">
+          <text wx:if="{{item.isPrimary}}" class="skill-star">⭐</text>
+          <text class="skill-name">{{item.name}}</text>
+          <text wx:if="{{item.level}}" class="skill-level">{{item.level}}</text>
+        </view>
+      </view>
+    </view>
+
     <!-- 详细信息 -->
     <view class="card card-purple" style="padding:0;">
       <view class="section-title" style="padding:24rpx 32rpx 12rpx;">

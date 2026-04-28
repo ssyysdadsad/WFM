@@ -2,7 +2,8 @@ export interface UrgentShiftRecord {
   id: string;
   title: string;
   shiftType: string;
-  shiftDate: string;
+  shiftDate: string; // 兼容字段（第一个日期）
+  shiftDates: string[]; // 多日期数组
   startTime: string;
   endTime: string;
   requiredCount: number;
@@ -24,7 +25,8 @@ export interface UrgentShiftRecord {
 export interface UrgentShiftFormValues {
   title: string;
   shiftType: string;
-  shiftDate: string;
+  shiftDate?: string; // 编辑单日期时使用
+  shiftDates?: string[]; // 多日期新建时使用
   startTime: string;
   endTime: string;
   requiredCount: number;

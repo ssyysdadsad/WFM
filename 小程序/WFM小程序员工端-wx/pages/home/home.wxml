@@ -33,7 +33,9 @@
       <view class="mini-cal-body">
         <view wx:for="{{calendarDays}}" wx:key="index"
           class="mini-cal-cell {{item.isToday ? 'is-today' : ''}} {{!item.day ? 'empty' : ''}}">
-          <text>{{item.day || ''}}</text>
+          <text class="mini-cal-day">{{item.day || ''}}</text>
+          <text wx:if="{{item.code}}" class="mini-cal-code" style="color:{{item.style.text}};">{{item.code}}</text>
+          <text wx:if="{{item.startTime}}" class="mini-cal-time" style="color:{{item.style.text}};">{{item.startTime}}</text>
         </view>
       </view>
     </view>
@@ -48,6 +50,37 @@
   </view>
 
   <view class="content">
+    <!-- 🔥 紧急班次提醒 -->
+    <view wx:if="{{urgentShifts.length > 0}}" class="urgent-banner" bindtap="goUrgentShifts">
+      <view class="urgent-banner-header">
+        <view class="urgent-banner-left">
+          <text class="urgent-icon">⚡</text>
+          <text class="urgent-banner-title">紧急班次招募</text>
+          <view class="urgent-badge">{{urgentCount}}</view>
+        </view>
+        <text class="urgent-banner-link">查看全部 ›</text>
+      </view>
+      <view class="urgent-list">
+        <view wx:for="{{urgentShifts}}" wx:key="id" class="urgent-item">
+          <view class="urgent-item-top">
+            <text class="urgent-item-title">{{item.title}}</text>
+            <view wx:if="{{item.signupStatus === 'approved'}}" class="urgent-status approved">已通过</view>
+            <view wx:elif="{{item.signupStatus === 'pending'}}" class="urgent-status pending">待审核</view>
+            <view wx:elif="{{item.signupStatus === 'rejected'}}" class="urgent-status rejected">未通过</view>
+            <view wx:else class="urgent-status open">可报名</view>
+          </view>
+          <view class="urgent-item-info">
+            <text class="urgent-info-text">📅 {{item.shiftDate}} {{item.startTime}}-{{item.endTime}}</text>
+            <text wx:if="{{item.projectName}}" class="urgent-info-text">📍 {{item.projectName}}</text>
+          </view>
+          <view class="urgent-item-bottom">
+            <text class="urgent-need">需{{item.requiredCount}}人</text>
+            <text class="urgent-deadline">⏰ {{item.deadlineLabel}}</text>
+          </view>
+        </view>
+      </view>
+    </view>
+
     <!-- 今日班次卡片 -->
     <view class="card today-card">
       <view class="section-header">
@@ -57,21 +90,32 @@
         </view>
       </view>
       <view wx:if="{{todaySchedule}}" class="today-info">
-        <view class="info-line">
-          <text class="info-label">地点：</text>
-          <text class="info-value">{{todaySchedule.project || '待安排'}}</text>
+        <view class="today-info-left">
+          <view class="info-line">
+            <text class="info-label">地点：</text>
+            <text class="info-value">{{todaySchedule.project || '待安排'}}</text>
+          </view>
+          <view class="info-line">
+            <text class="info-label">部门：</text>
+            <text class="info-value">{{employee.department || '-'}}</text>
+          </view>
+          <view class="info-line">
+            <text class="info-label">时长：</text>
+            <text class="info-value">{{todaySchedule.hours || 0}} 小时</text>
+          </view>
         </view>
-        <view class="info-line">
-          <text class="info-label">部门：</text>
-          <text class="info-value">{{employee.department || '-'}}</text>
-        </view>
-        <view class="info-line">
-          <text class="info-label">时长：</text>
-          <text class="info-value">{{todaySchedule.hours || 0}} 小时</text>
+        <view class="today-shift-badge" style="background:{{todayStyle.bg}};color:{{todayStyle.text}};border:2rpx solid {{todayStyle.text}}20;">
+          <text class="today-shift-badge-code">{{todayCode}}</text>
+          <text wx:if="{{todayTime}}" class="today-shift-badge-time">{{todayTime}}</text>
         </view>
       </view>
-      <view wx:else class="today-rest">
-        <text class="rest-text">休息 · 今日无排班</text>
+      <view wx:else class="today-info">
+        <view class="today-info-left">
+          <text class="rest-text">今日无排班，好好休息~</text>
+        </view>
+        <view class="today-shift-badge rest-badge">
+          <text class="today-shift-badge-code">休</text>
+        </view>
       </view>
       <view class="detail-btn" bindtap="goSchedule">
         <text>查看详情</text>
@@ -98,19 +142,19 @@
     <!-- 快捷操作 -->
     <view class="action-grid">
       <view class="action-btn action-blue" bindtap="goApply">
-        <text class="action-icon">⚡</text>
+        <text class="action-icon">📋</text>
         <text class="action-label">申请中心</text>
       </view>
       <view class="action-btn action-green" bindtap="goAnnouncement">
-        <text class="action-icon">⚡</text>
+        <text class="action-icon">📢</text>
         <text class="action-label">查看公告</text>
       </view>
-      <view class="action-btn action-orange" bindtap="goSchedule">
-        <text class="action-icon">⚡</text>
-        <text class="action-label">排班详情</text>
+      <view class="action-btn action-orange" bindtap="goUrgentShifts">
+        <text class="action-icon">🚨</text>
+        <text class="action-label">紧急班次</text>
       </view>
       <view class="action-btn action-purple" bindtap="goProfile">
-        <text class="action-icon">⚡</text>
+        <text class="action-icon">👤</text>
         <text class="action-label">我的信息</text>
       </view>
     </view>

@@ -9,15 +9,15 @@
     "pages/change-password/change-password"
   ],
   "window": {
-    "navigationBarBackgroundColor": "#2895FF",
+    "navigationBarBackgroundColor": "#1E6FD9",
     "navigationBarTitleText": "WFM排班",
     "navigationBarTextStyle": "white",
-    "backgroundColor": "#F6F8FA",
+    "backgroundColor": "#F2F5F9",
     "backgroundTextStyle": "dark"
   },
   "tabBar": {
-    "color": "#A3B5C8",
-    "selectedColor": "#2895FF",
+    "color": "#8899AA",
+    "selectedColor": "#1E6FD9",
     "backgroundColor": "#FFFFFF",
     "borderStyle": "white",
     "list": [

@@ -7,6 +7,7 @@ export type AnnouncementRecord = {
   visibilityScopeConfig?: Record<string, any> | null;
   publishedByUserAccountId: string;
   publishedAt: string;
+  isPinned: boolean;
 };
 
 export type AnnouncementTypeOption = {

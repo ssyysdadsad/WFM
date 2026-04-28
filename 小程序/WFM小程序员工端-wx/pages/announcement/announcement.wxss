@@ -1,11 +1,11 @@
 .ann-page { min-height: 100vh; }
-.filter-bar { background: #fff; padding: 24rpx 40rpx 16rpx; border-bottom: 1rpx solid #DDE9FF; }
-.header-title { font-size: 32rpx; font-weight: 600; color: #1A2E4A; display: block; margin-bottom: 20rpx; }
+.filter-bar { background: rgba(255,255,255,0.92); padding: 24rpx 40rpx 16rpx; border-bottom: 1rpx solid rgba(221,233,255,0.4); backdrop-filter: blur(20px); }
+.header-title { font-size: 32rpx; font-weight: 700; color: #1A2233; display: block; margin-bottom: 20rpx; letter-spacing: 1rpx; }
 .type-scroll { white-space: nowrap; padding-bottom: 8rpx; }
-.type-btn { display: inline-block; padding: 8rpx 24rpx; border-radius: 32rpx; font-size: 24rpx; color: #A3B5C8; background: #F6F8FA; border: 1rpx solid #DDE9FF; margin-right: 12rpx; }
-.type-btn.active { color: #fff; background: linear-gradient(90deg, #2895FF, #62D9FF); border-color: transparent; font-weight: 600; }
+.type-btn { display: inline-block; padding: 10rpx 28rpx; border-radius: 32rpx; font-size: 24rpx; color: #8899AA; background: rgba(246,248,250,0.8); border: 1rpx solid rgba(221,233,255,0.4); margin-right: 12rpx; font-weight: 500; }
+.type-btn.active { color: #fff; background: linear-gradient(135deg, #3B8BF2, #1E6FD9); border-color: transparent; font-weight: 600; box-shadow: 0 4rpx 16rpx rgba(59,139,242,0.2); }
 .empty-state { display: flex; flex-direction: column; align-items: center; padding: 120rpx 0; }
 .ann-card { padding: 24rpx 32rpx; }
-.ann-icon { width: 72rpx; height: 72rpx; border-radius: 16rpx; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-.ann-title { font-size: 26rpx; font-weight: 500; color: #1A2E4A; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
-.ann-content { font-size: 22rpx; color: #A3B5C8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+.ann-icon { width: 72rpx; height: 72rpx; border-radius: 18rpx; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.ann-title { font-size: 26rpx; font-weight: 600; color: #1A2233; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.ann-content { font-size: 22rpx; color: #8899AA; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }

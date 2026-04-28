@@ -43,11 +43,12 @@
             </view>
             <view class="flex-1" style="min-width:0;">
               <view class="flex-row" style="justify-content:space-between;margin-bottom:8rpx;">
-                <text class="ann-title">{{item.title}}</text>
+                <text class="ann-title">{{item.isPinned ? '📌 ' : ''}}{{item.title}}</text>
                 <text style="font-size:24rpx;color:#C0CFDD;">▶</text>
               </view>
               <text class="ann-content">{{item.content}}</text>
               <view class="flex-row gap-sm" style="margin-top:12rpx;">
+                <text wx:if="{{item.isPinned}}" class="tag" style="background:#FEF3C7;color:#D97706;font-size:20rpx;">置顶</text>
                 <text class="tag" style="background:{{item.tagBg}};color:{{item.tagColor}};font-size:20rpx;">{{item.type}}</text>
                 <text style="font-size:20rpx;color:#C0CFDD;">{{item.date}}</text>
               </view>

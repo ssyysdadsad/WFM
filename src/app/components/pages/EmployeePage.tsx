@@ -8,7 +8,7 @@ import {
 import {
   PlusOutlined, EditOutlined, ReloadOutlined, EyeOutlined,
   DownloadOutlined, UploadOutlined, FileExcelOutlined, WarningOutlined,
-  UserAddOutlined, LockOutlined, CalendarOutlined,
+  UserAddOutlined, LockOutlined, CalendarOutlined, DeleteOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { getErrorMessage } from '@/app/lib/supabase/errors';
@@ -41,6 +41,7 @@ import type {
 type ImportResult = {
   successCount: number;
   failedRows: { rowIndex: number; name: string; reason: string }[];
+  accountProvisionResult: { success: number; failed: number; errors: string[] };
 };
 
 export function EmployeePage() {
@@ -53,6 +54,7 @@ export function EmployeePage() {
   const [filterDept, setFilterDept]   = useState<string | undefined>();
   const [filterLaborRelation, setFilterLaborRelation] = useState<string | undefined>();
   const [filterStatus, setFilterStatus] = useState<string | undefined>();
+  const [filterProject, setFilterProject] = useState<string | undefined>();
   const [form]                        = Form.useForm();
   const [departments, setDepartments] = useState<ReferenceOption[]>([]);
   const [channels, setChannels]       = useState<ReferenceOption[]>([]);
@@ -62,6 +64,9 @@ export function EmployeePage() {
   const [skillModal, setSkillModal]   = useState(false);
   const [skillForm]                   = Form.useForm();
   const [allSkills, setAllSkills]     = useState<ReferenceOption[]>([]);
+  // 项目列表 + 项目-员工映射
+  const [projects, setProjects]       = useState<{ id: string; name: string }[]>([]);
+  const [projectEmployeeIds, setProjectEmployeeIds] = useState<Set<string> | null>(null);
   const { items: statusItems, loading: statusLoading } = useDict('employee_status');
   const { items: laborRelationItems, loading: laborRelationLoading } = useDict('labor_relation_type');
   // 暂存待编辑的记录，用于在 statusItems 异步加载完成后重新回填状态字段
@@ -118,7 +123,38 @@ export function EmployeePage() {
     } catch (error) {
       message.error(getErrorMessage(error, '加载员工关联数据失败'));
     }
+    // 加载项目列表
+    try {
+      const { data: projectData } = await supabase
+        .from('project')
+        .select('id, project_name')
+        .order('project_name');
+      setProjects((projectData || []).map((p: any) => ({ id: p.id, name: p.project_name })));
+    } catch { /* ignore */ }
   }
+
+  /** 根据选中项目加载该项目下的员工ID集合 */
+  async function loadProjectEmployeeIds(projectId: string | undefined) {
+    if (!projectId) {
+      setProjectEmployeeIds(null);
+      return;
+    }
+    try {
+      const { data: peData } = await supabase
+        .from('project_employee')
+        .select('employee_id')
+        .eq('project_id', projectId)
+        .eq('is_active', true);
+      setProjectEmployeeIds(new Set((peData || []).map((r: any) => r.employee_id)));
+    } catch {
+      setProjectEmployeeIds(null);
+    }
+  }
+
+  // 项目筛选变化时重新加载关联员工
+  useEffect(() => {
+    loadProjectEmployeeIds(filterProject);
+  }, [filterProject]);
 
   /** 批量加载所有员工的技能映射 */
   async function loadAllEmployeeSkills() {
@@ -183,12 +219,13 @@ export function EmployeePage() {
     } catch (_) { /* ignore */ }
   }
 
-  /** 重置员工密码（仅超管） */
-  async function handleResetPassword() {
-    if (!pwdTarget) return;
+  /** 重置员工密码为初始密码（手机号后6位，仅超管） */
+  async function handleResetPassword(record: typeof pwdTarget) {
+    if (!record) return;
     try {
-      const values = await pwdForm.validateFields();
+      setPwdTarget(record);
       setPwdLoading(true);
+      const initialPassword = record.mobileNumber?.slice(-6) || '123456';
 
       const { data: sessionData } = await supabase.auth.getSession();
       const token = sessionData?.session?.access_token || publicAnonKey;
@@ -202,24 +239,57 @@ export function EmployeePage() {
         },
         body: JSON.stringify({
           action: 'reset_password',
-          employee_id: pwdTarget.id,
-          new_password: values.new_password,
+          employee_id: record.id,
+          new_password: initialPassword,
         }),
       });
       const result = await res.json();
       if (result.success) {
-        message.success(result.message || '密码已重置');
-        setPwdModalOpen(false);
-        pwdForm.resetFields();
+        message.success(`密码已重置为初始密码（手机号后6位：${initialPassword}）`);
         loadAccountStatuses();
       } else {
         message.error(result.message || '重置失败');
       }
     } catch (err: any) {
-      if (err?.errorFields) return;
       message.error(getErrorMessage(err, '重置密码失败'));
     } finally {
       setPwdLoading(false);
+      setPwdTarget(null);
+    }
+  }
+
+  /** 删除员工及所有关联数据 */
+  async function handleDeleteEmployee(record: EmployeeRecord) {
+    try {
+      const empId = record.id;
+      // 1. 删除用户账号
+      await supabase.from('user_account').delete().eq('employee_id', empId);
+      // 2. 删除排班数据
+      await supabase.from('schedule').delete().eq('employee_id', empId);
+      // 3. 删除调班记录
+      await supabase.from('shift_change_request').delete().or(`applicant_employee_id.eq.${empId},target_employee_id.eq.${empId}`);
+      // 4. 删除紧急班报名
+      await supabase.from('urgent_shift_signup').delete().eq('employee_id', empId);
+      // 5. 删除消息
+      await supabase.from('employee_message').delete().eq('employee_id', empId);
+      // 6. 删除工作指标
+      await supabase.from('employee_work_metric').delete().eq('employee_id', empId);
+      // 7. 删除技能关联
+      await supabase.from('employee_skill').delete().eq('employee_id', empId);
+      // 8. 删除项目关联
+      await supabase.from('project_employee').delete().eq('employee_id', empId);
+      // 9. 清除部门经理引用
+      await supabase.from('department').update({ manager_employee_id: null }).eq('manager_employee_id', empId);
+      // 10. 清除项目负责人引用
+      await supabase.from('project').update({ owner_employee_id: null }).eq('owner_employee_id', empId);
+      // 11. 删除员工本体
+      const { error } = await supabase.from('employee').delete().eq('id', empId);
+      if (error) throw error;
+
+      message.success(`员工「${record.fullName}」已删除`);
+      loadData();
+    } catch (err: any) {
+      message.error(getErrorMessage(err, '删除员工失败'));
     }
   }
 
@@ -374,8 +444,16 @@ export function EmployeePage() {
       setImportResult(result);
 
       if (result.successCount > 0) {
-        message.success(`成功导入 ${result.successCount} 条员工记录`);
+        const acctMsg = result.accountProvisionResult.success > 0
+          ? `，已自动开通 ${result.accountProvisionResult.success} 个登录账号`
+          : '';
+        message.success(`成功导入 ${result.successCount} 条员工记录${acctMsg}`);
         await loadData();
+        // 刷新账号状态（如果是管理员）
+        if (isAdmin) loadAccountStatuses();
+      }
+      if (result.accountProvisionResult.failed > 0) {
+        message.warning(`${result.accountProvisionResult.failed} 个账号开通失败，请查看详情`);
       }
       if (result.failedRows.length > 0) {
         message.warning(`${result.failedRows.length} 行导入失败，请查看错误详情`);
@@ -462,11 +540,12 @@ export function EmployeePage() {
       if (filterDept           && emp.departmentId              !== filterDept)           return false;
       if (filterLaborRelation  && emp.laborRelationDictItemId   !== filterLaborRelation)  return false;
       if (filterStatus         && emp.employeeStatusDictItemId  !== filterStatus)          return false;
+      if (filterProject        && projectEmployeeIds            && !projectEmployeeIds.has(emp.id)) return false;
       return true;
     });
-  }, [data, filterDept, filterLaborRelation, filterStatus]);
+  }, [data, filterDept, filterLaborRelation, filterStatus, filterProject, projectEmployeeIds]);
 
-  const hasFilter = !!(filterDept || filterLaborRelation || filterStatus);
+  const hasFilter = !!(filterDept || filterLaborRelation || filterStatus || filterProject);
 
   const errorCount = importRows.filter((r) => r.error).length;
   const validCount = importRows.filter((r) => !r.error).length;
@@ -561,6 +640,16 @@ export function EmployeePage() {
       <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
         <Select
           allowClear
+          placeholder="按项目筛选"
+          style={{ width: 160 }}
+          value={filterProject}
+          onChange={(v) => setFilterProject(v)}
+          showSearch
+          optionFilterProp="label"
+          options={projects.map((p) => ({ label: p.name, value: p.id }))}
+        />
+        <Select
+          allowClear
           placeholder="按部门筛选"
           style={{ width: 150 }}
           value={filterDept}
@@ -586,7 +675,7 @@ export function EmployeePage() {
         {hasFilter && (
           <Button
             size="small"
-            onClick={() => { setFilterDept(undefined); setFilterLaborRelation(undefined); setFilterStatus(undefined); }}
+            onClick={() => { setFilterProject(undefined); setFilterDept(undefined); setFilterLaborRelation(undefined); setFilterStatus(undefined); }}
           >
             清除筛选
           </Button>
@@ -638,7 +727,7 @@ export function EmployeePage() {
           { title: '入职日期', dataIndex: 'onboardDate', width: 100 },
           { title: '状态', dataIndex: 'employeeStatusDictItemId', width: 80, render: (value?: string | null) => <Tag>{value ? statusMap[value] || '-' : '-'}</Tag> },
           {
-            title: '操作', key: 'action', width: isAdmin ? 220 : 160,
+            title: '操作', key: 'action', width: isAdmin ? 280 : 200,
             render: (_: unknown, record: EmployeeRecord) => (
               <Space>
                 <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => openDetail(record)}>详情</Button>
@@ -667,12 +756,26 @@ export function EmployeePage() {
                   setModalOpen(true);
                 }}>编辑</Button>
                 {isAdmin && accountStatusMap[record.id]?.hasAccount && (
-                  <Button type="link" size="small" icon={<LockOutlined />} onClick={() => {
-                    setPwdTarget(record);
-                    pwdForm.resetFields();
-                    setPwdModalOpen(true);
-                  }}>改密</Button>
+                  <Popconfirm
+                    title="确定重置密码？"
+                    description={`将重置为初始密码（手机号后6位：${record.mobileNumber?.slice(-6) || '123456'}），员工下次登录需使用新密码。`}
+                    onConfirm={() => handleResetPassword(record)}
+                    okText="确定重置"
+                    cancelText="取消"
+                  >
+                    <Button type="link" size="small" icon={<LockOutlined />} loading={pwdLoading && pwdTarget?.id === record.id}>重置密码</Button>
+                  </Popconfirm>
                 )}
+                <Popconfirm
+                  title="确定删除该员工？"
+                  description={`将永久删除「${record.fullName}」及其所有排班、调班等关联数据，此操作不可撤回。`}
+                  onConfirm={() => handleDeleteEmployee(record)}
+                  okText="确定删除"
+                  cancelText="取消"
+                  okButtonProps={{ danger: true }}
+                >
+                  <Button type="link" size="small" danger icon={<DeleteOutlined />}>删除</Button>
+                </Popconfirm>
               </Space>
             ),
           },
@@ -890,8 +993,44 @@ export function EmployeePage() {
                   导入完成：成功 <strong>{importResult.successCount}</strong> 条，失败 <strong>{importResult.failedRows.length}</strong> 条
                 </span>
               }
-              style={{ marginBottom: 16 }}
+              style={{ marginBottom: 12 }}
             />
+            {/* 账号开通结果 */}
+            {importResult.accountProvisionResult && (
+              <Alert
+                type={importResult.accountProvisionResult.failed > 0 ? 'warning' : 'info'}
+                showIcon
+                icon={<UserAddOutlined />}
+                message={
+                  <span>
+                    账号自动开通：成功 <strong>{importResult.accountProvisionResult.success}</strong> 个
+                    {importResult.accountProvisionResult.failed > 0 && (
+                      <>，失败 <strong style={{ color: '#ff4d4f' }}>{importResult.accountProvisionResult.failed}</strong> 个</>
+                    )}
+                    <Typography.Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
+                      （初始密码为手机号后6位，首次登录需修改）
+                    </Typography.Text>
+                  </span>
+                }
+                style={{ marginBottom: 12 }}
+              />
+            )}
+            {/* 账号开通失败详情 */}
+            {importResult.accountProvisionResult?.errors?.length > 0 && (
+              <Alert
+                type="error"
+                showIcon
+                message="账号开通失败详情"
+                description={
+                  <div style={{ maxHeight: 120, overflow: 'auto', fontSize: 12 }}>
+                    {importResult.accountProvisionResult.errors.map((err, i) => (
+                      <div key={i} style={{ marginBottom: 2 }}>{err}</div>
+                    ))}
+                  </div>
+                }
+                style={{ marginBottom: 12 }}
+              />
+            )}
             {importResult.failedRows.length > 0 && (
               <Table
                 size="small"
@@ -968,56 +1107,6 @@ export function EmployeePage() {
         .ant-table-row-error td { background-color: #fff2f0 !important; }
       `}</style>
 
-      {/* 密码重置 Modal（仅超管可见） */}
-      {isAdmin && (
-        <Modal
-          title={<><LockOutlined style={{ marginRight: 8 }} />重置小程序登录密码 - {pwdTarget?.fullName}</>}
-          open={pwdModalOpen}
-          onOk={handleResetPassword}
-          onCancel={() => { setPwdModalOpen(false); pwdForm.resetFields(); }}
-          confirmLoading={pwdLoading}
-          destroyOnClose
-          width={480}
-        >
-          <Alert
-            type="warning"
-            showIcon
-            message="重置后该员工下次登录小程序需使用新密码，且会被要求再次修改密码。"
-            style={{ marginBottom: 16, marginTop: 8 }}
-          />
-          <Form form={pwdForm} layout="vertical">
-            <Form.Item
-              name="new_password"
-              label="新密码"
-              rules={[
-                { required: true, message: '请输入新密码' },
-                { min: 8, message: '密码至少8位' },
-                { pattern: /^(?=.*[a-zA-Z])(?=.*\d)/, message: '密码需包含字母和数字' },
-              ]}
-            >
-              <Input.Password placeholder="请输入新密码（至少8位，需含字母和数字）" />
-            </Form.Item>
-            <Form.Item
-              name="confirm_password"
-              label="确认密码"
-              dependencies={['new_password']}
-              rules={[
-                { required: true, message: '请再次输入密码' },
-                ({ getFieldValue }) => ({
-                  validator(_, value) {
-                    if (!value || getFieldValue('new_password') === value) {
-                      return Promise.resolve();
-                    }
-                    return Promise.reject(new Error('两次输入的密码不一致'));
-                  },
-                }),
-              ]}
-            >
-              <Input.Password placeholder="请再次输入密码" />
-            </Form.Item>
-          </Form>
-        </Modal>
-      )}
     </div>
   );
 }
