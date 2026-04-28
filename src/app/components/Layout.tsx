@@ -64,6 +64,7 @@ const menuItems = [
       { key: '/schedule-version', icon: <CalendarOutlined />, label: '排班版本', moduleCode: 'schedule_version' },
       { key: '/schedule', icon: <CalendarOutlined />, label: '排班矩阵', moduleCode: 'schedule' },
       { key: '/schedule-code', icon: <TagsOutlined />, label: '排班编码', moduleCode: 'dict' },
+      { key: '/attendance-compare', icon: <ThunderboltOutlined />, label: '考勤比对', moduleCode: 'schedule' },
       { key: '/shift-change', icon: <SwapOutlined />, label: '调班审批', moduleCode: 'shift_change' },
       { key: '/urgent-shift', icon: <ThunderboltOutlined />, label: '紧急班次', moduleCode: 'urgent_shift' },
     ],

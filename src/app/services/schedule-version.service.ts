@@ -143,7 +143,7 @@ export async function publishScheduleVersion(payload: SchedulePublishPayload) {
     throw new AppError('缺少发布状态字典项', 'DICT_STATUS_MISSING');
   }
 
-  // --- Step 1: 将同项目同月份的旧版本标记为 is_active=false（保留数据用于查看矩阵） ---
+  // --- Step 1: 将同项目同月份的旧版本标记为 is_active=false 并归档 ---
   const { data: oldVersions } = await supabase
     .from('schedule_version')
     .select('id')
@@ -156,7 +156,7 @@ export async function publishScheduleVersion(payload: SchedulePublishPayload) {
   if (oldVersionIds.length > 0) {
     await supabase
       .from('schedule_version')
-      .update({ is_active: false })
+      .update({ is_active: false, status: 'archived' })
       .in('id', oldVersionIds);
   }
 
@@ -169,6 +169,7 @@ export async function publishScheduleVersion(payload: SchedulePublishPayload) {
       published_at: publishedAt,
       published_by_user_account_id: payload.operatorUserAccountId,
       is_active: true,
+      status: 'active',
     })
     .eq('id', payload.scheduleVersionId);
 

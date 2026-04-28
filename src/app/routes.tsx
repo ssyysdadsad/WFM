@@ -22,6 +22,7 @@ import { ProtectedRoute } from './components/auth/ProtectedRoute';
 import { AccountPermissionPage } from './components/pages/AccountPermissionPage';
 import { UrgentShiftPage } from './components/pages/UrgentShiftPage';
 import { ScheduleCodePage } from './components/pages/ScheduleCodePage';
+import { AttendanceComparePage } from './components/pages/AttendanceComparePage';
 
 function ProtectedAppLayout() {
   return (
@@ -54,6 +55,7 @@ export const router = createBrowserRouter([
       { path: 'schedule-version', Component: ScheduleVersionPage },
       { path: 'schedule', Component: ScheduleMatrixPage },
       { path: 'schedule-code', Component: ScheduleCodePage },
+      { path: 'attendance-compare', Component: AttendanceComparePage },
       { path: 'schedule/employee/:employeeId', Component: EmployeeScheduleDetailPage },
       { path: 'shift-change', Component: ShiftChangePage },
       { path: 'report', Component: ReportPage },
