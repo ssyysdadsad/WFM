@@ -54,8 +54,8 @@ export async function listShiftChangeRequests() {
     .from('shift_change_request')
     .select(`
       *,
-      applicant:applicant_employee_id(full_name, department_id, labor_relation_dict_item_id, department:department_id(department_name)),
-      target_employee:target_employee_id(full_name),
+      applicant:applicant_employee_id!shift_change_request_applicant_employee_id_fkey(full_name, department_id, labor_relation_dict_item_id, department:department_id(department_name)),
+      target_employee:target_employee_id!fk_shift_change_request_target_employee(full_name),
       original_schedule:original_schedule_id(schedule_date, planned_hours, schedule_version_id, schedule_code_dict_item_id, project_id, schedule_code:schedule_code_dict_item_id(item_name), project:project_id(project_name, start_date, end_date)),
       target_schedule:target_schedule_id(schedule_date, schedule_code_dict_item_id, schedule_code:schedule_code_dict_item_id(item_name)),
       target_code:target_schedule_code_dict_item_id(item_name),

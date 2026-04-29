@@ -43,6 +43,7 @@ type ImportResult = {
   skippedCount: number;
   skippedRows: { rowIndex: number; name: string; reason: string }[];
   failedRows: { rowIndex: number; name: string; reason: string }[];
+  warningRows: { rowIndex: number; name: string; reason: string }[];
   accountProvisionResult: { success: number; failed: number; errors: string[] };
 };
 
@@ -87,6 +88,7 @@ export function EmployeePage() {
   // 员工账号开通
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [provisionLoading, setProvisionLoading] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   // 超管密码管理
   const [isAdmin, setIsAdmin] = useState(false);
@@ -261,38 +263,66 @@ export function EmployeePage() {
     }
   }
 
-  /** 删除员工及所有关联数据 */
+  /** 删除单个员工（数据库已配置级联删除，仅需清理 user_account 和引用字段） */
   async function handleDeleteEmployee(record: EmployeeRecord) {
     try {
-      const empId = record.id;
-      // 1. 删除用户账号
-      await supabase.from('user_account').delete().eq('employee_id', empId);
-      // 2. 删除排班数据
-      await supabase.from('schedule').delete().eq('employee_id', empId);
-      // 3. 删除调班记录
-      await supabase.from('shift_change_request').delete().or(`applicant_employee_id.eq.${empId},target_employee_id.eq.${empId}`);
-      // 4. 删除紧急班报名
-      await supabase.from('urgent_shift_signup').delete().eq('employee_id', empId);
-      // 5. 删除消息
-      await supabase.from('employee_message').delete().eq('employee_id', empId);
-      // 6. 删除工作指标
-      await supabase.from('employee_work_metric').delete().eq('employee_id', empId);
-      // 7. 删除技能关联
-      await supabase.from('employee_skill').delete().eq('employee_id', empId);
-      // 8. 删除项目关联
-      await supabase.from('project_employee').delete().eq('employee_id', empId);
-      // 9. 清除部门经理引用
-      await supabase.from('department').update({ manager_employee_id: null }).eq('manager_employee_id', empId);
-      // 10. 清除项目负责人引用
-      await supabase.from('project').update({ owner_employee_id: null }).eq('owner_employee_id', empId);
-      // 11. 删除员工本体
-      const { error } = await supabase.from('employee').delete().eq('id', empId);
-      if (error) throw error;
-
+      setDeleteLoading(true);
+      await deleteEmployeeById(record.id);
       message.success(`员工「${record.fullName}」已删除`);
-      loadData();
+      setSelectedRowKeys((keys) => keys.filter((k) => k !== record.id));
+      await loadData();
+      if (isAdmin) loadAccountStatuses();
     } catch (err: any) {
       message.error(getErrorMessage(err, '删除员工失败'));
+    } finally {
+      setDeleteLoading(false);
+    }
+  }
+
+  /** 删除单个员工的核心逻辑 */
+  async function deleteEmployeeById(empId: string) {
+    // 1. 清理 user_account（SET NULL 不阻塞，但应主动删除）
+    await supabase.from('user_account').delete().eq('employee_id', empId);
+    // 2. 删除员工本体（其余关联数据通过 CASCADE / SET NULL 自动处理）
+    const { error } = await supabase.from('employee').delete().eq('id', empId);
+    if (error) throw error;
+  }
+
+  /** 批量删除选中员工 */
+  async function handleBatchDelete() {
+    if (selectedRowKeys.length === 0) {
+      message.warning('请先勾选需要删除的员工');
+      return;
+    }
+    setDeleteLoading(true);
+    let successCount = 0;
+    let failedCount = 0;
+    const failedNames: string[] = [];
+    try {
+      for (const key of selectedRowKeys) {
+        const empId = String(key);
+        const empRecord = data.find((e) => e.id === empId);
+        try {
+          await deleteEmployeeById(empId);
+          successCount++;
+        } catch {
+          failedCount++;
+          failedNames.push(empRecord?.fullName || empId);
+        }
+      }
+      if (successCount > 0) {
+        message.success(`成功删除 ${successCount} 名员工`);
+      }
+      if (failedCount > 0) {
+        message.error(`${failedCount} 名员工删除失败：${failedNames.join('、')}`);
+      }
+      setSelectedRowKeys([]);
+      await loadData();
+      if (isAdmin) loadAccountStatuses();
+    } catch (err: any) {
+      message.error(getErrorMessage(err, '批量删除过程中发生错误'));
+    } finally {
+      setDeleteLoading(false);
     }
   }
 
@@ -495,7 +525,7 @@ export function EmployeePage() {
           'Authorization': `Bearer ${token}`,
           'apikey': publicAnonKey,
         },
-        body: JSON.stringify({ employee_ids: selectedRowKeys, default_password: '123456789' }),
+        body: JSON.stringify({ employee_ids: selectedRowKeys }),
       });
       const result = await res.json();
       if (result.success) {
@@ -616,7 +646,7 @@ export function EmployeePage() {
             </Button>
           </Tooltip>
 
-          <Tooltip title="为选中员工创建小程序登录账号（手机号+初始密码123456789）">
+          <Tooltip title="为选中员工创建小程序登录账号（初始密码为手机号后6位）">
             <Button
               id="employee-provision-btn"
               icon={<UserAddOutlined />}
@@ -627,6 +657,26 @@ export function EmployeePage() {
               开通账号{selectedRowKeys.length > 0 ? ` (${selectedRowKeys.length})` : ''}
             </Button>
           </Tooltip>
+
+          {selectedRowKeys.length > 0 && (
+            <Popconfirm
+              title={`确定批量删除 ${selectedRowKeys.length} 名员工？`}
+              description="将永久删除选中员工及其所有排班、调班等关联数据，此操作不可撤回。"
+              onConfirm={handleBatchDelete}
+              okText="确定删除"
+              cancelText="取消"
+              okButtonProps={{ danger: true }}
+            >
+              <Button
+                id="employee-batch-delete-btn"
+                danger
+                icon={<DeleteOutlined />}
+                loading={deleteLoading}
+              >
+                批量删除 ({selectedRowKeys.length})
+              </Button>
+            </Popconfirm>
+          )}
 
           <Button
             id="employee-add-btn"
@@ -1067,6 +1117,26 @@ export function EmployeePage() {
                     { title: 'Excel 行号', dataIndex: 'rowIndex', width: 80 },
                     { title: '姓名', dataIndex: 'name', width: 100 },
                     { title: '说明', dataIndex: 'reason', render: (v: string) => <Typography.Text type="secondary">{v}</Typography.Text> },
+                  ]}
+                  style={{ marginBottom: 12 }}
+                />
+              </>
+            )}
+
+            {/* 导入警告列表（技能未匹配等） */}
+            {importResult.warningRows && importResult.warningRows.length > 0 && (
+              <>
+                <Typography.Text strong type="warning" style={{ display: 'block', marginBottom: 4 }}>导入警告</Typography.Text>
+                <Table
+                  size="small"
+                  rowKey="rowIndex"
+                  pagination={false}
+                  dataSource={importResult.warningRows}
+                  scroll={{ y: 150 }}
+                  columns={[
+                    { title: 'Excel 行号', dataIndex: 'rowIndex', width: 80 },
+                    { title: '姓名', dataIndex: 'name', width: 100 },
+                    { title: '警告说明', dataIndex: 'reason', render: (v: string) => <Typography.Text type="warning">{v}</Typography.Text> },
                   ]}
                   style={{ marginBottom: 12 }}
                 />

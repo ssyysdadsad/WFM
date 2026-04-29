@@ -126,7 +126,42 @@ export type ImportRow = {
   error?: string;
 };
 
-/** 解析上传的 Excel 文件 */
+/** 列名关键词匹配规则：从表头自动识别列位置 */
+const COLUMN_MATCHERS: { field: keyof Omit<ImportRow, 'rowIndex' | 'error'>; keywords: string[] }[] = [
+  { field: 'employeeNo',       keywords: ['工号', '编号', '员工编号', 'emp'] },
+  { field: 'fullName',         keywords: ['姓名', '名字', '员工姓名', 'name'] },
+  { field: 'mobileNumber',     keywords: ['手机', '电话', '联系方式', 'mobile', 'phone'] },
+  { field: 'departmentName',   keywords: ['部门', 'dept', 'department'] },
+  { field: 'channelName',      keywords: ['渠道', 'channel'] },
+  { field: 'laborRelationName',keywords: ['劳务', '用工', '关系', 'labor'] },
+  { field: 'onboardDate',      keywords: ['入职', '日期', 'date', 'onboard'] },
+  { field: 'skillNames',       keywords: ['技能', 'skill'] },
+  { field: 'remark',           keywords: ['备注', '说明', 'remark', 'note'] },
+];
+
+/** 根据表头行自动检测列位置，返回 field → columnIndex 映射 */
+function detectColumnMapping(headerRow: any[]): Record<string, number> {
+  const mapping: Record<string, number> = {};
+  const usedIndices = new Set<number>();
+
+  for (const matcher of COLUMN_MATCHERS) {
+    for (let i = 0; i < headerRow.length; i++) {
+      if (usedIndices.has(i)) continue;
+      const headerText = String(headerRow[i] || '').trim().toLowerCase();
+      if (!headerText) continue;
+      const matched = matcher.keywords.some(kw => headerText.includes(kw.toLowerCase()));
+      if (matched) {
+        mapping[matcher.field] = i;
+        usedIndices.add(i);
+        break;
+      }
+    }
+  }
+
+  return mapping;
+}
+
+/** 解析上传的 Excel 文件（自动识别列位置，兼容不同顺序的表格） */
 export function parseEmployeeExcel(file: File): Promise<ImportRow[]> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -137,19 +172,49 @@ export function parseEmployeeExcel(file: File): Promise<ImportRow[]> {
         const ws = wb.Sheets[wb.SheetNames[0]];
         const rows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
 
+        if (rows.length === 0) {
+          resolve([]);
+          return;
+        }
+
+        // 尝试自动检测列位置
+        const headerRow = rows[0];
+        const colMap = detectColumnMapping(headerRow);
+
+        // 如果连姓名和手机号都没匹配到，回退到固定索引
+        const useAutoDetect = colMap['fullName'] !== undefined && colMap['mobileNumber'] !== undefined;
+
+        const getVal = (row: any[], field: string, fallbackIdx: number): string => {
+          const idx = useAutoDetect ? (colMap[field] ?? fallbackIdx) : fallbackIdx;
+          return String(row[idx] ?? '').trim();
+        };
+
         // 跳过表头行（第一行）
         const dataRows = rows.slice(1).filter((r) => r.some((cell) => String(cell).trim() !== ''));
 
         const result: ImportRow[] = dataRows.map((row, idx) => {
-          const employeeNo  = String(row[0] || '').trim();
-          const fullName    = String(row[1] || '').trim();
-          const mobileNo    = String(row[2] || '').trim();
-          const deptName    = String(row[3] || '').trim();
-          const channelName = String(row[4] || '').trim();
-          const laborRelationName = String(row[5] || '').trim();
-          const onboardDate = String(row[6] || '').trim();
-          const skillNames  = String(row[7] || '').trim();
-          const remark      = String(row[8] || '').trim();
+          const employeeNo       = getVal(row, 'employeeNo', 0);
+          const fullName         = getVal(row, 'fullName', 1);
+          const mobileNo         = getVal(row, 'mobileNumber', 2);
+          const deptName         = getVal(row, 'departmentName', 3);
+          const channelName      = getVal(row, 'channelName', 4);
+          const laborRelationName= getVal(row, 'laborRelationName', 5);
+          let   onboardDate      = getVal(row, 'onboardDate', 6);
+          const skillNames       = getVal(row, 'skillNames', 7);
+          const remark           = getVal(row, 'remark', 8);
+
+          // 智能日期格式处理：Excel 数值日期 → YYYY-MM-DD
+          const onboardIdx = useAutoDetect ? (colMap['onboardDate'] ?? 6) : 6;
+          const rawDateCell = row[onboardIdx];
+          if (typeof rawDateCell === 'number' && rawDateCell > 30000 && rawDateCell < 100000) {
+            // Excel 日期序列号转换
+            const excelEpoch = new Date(1899, 11, 30);
+            const d = new Date(excelEpoch.getTime() + rawDateCell * 86400000);
+            onboardDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+          } else if (onboardDate && /^\d{4}\/\d{1,2}\/\d{1,2}$/.test(onboardDate)) {
+            // 处理 YYYY/MM/DD 格式
+            onboardDate = onboardDate.replace(/\//g, '-').replace(/-(\d)(?=-|$)/g, '-0$1');
+          }
 
           let error = '';
           if (!fullName)  error += '姓名不能为空；';
@@ -195,6 +260,7 @@ export async function batchImportEmployees(
   skippedCount: number;
   skippedRows: { rowIndex: number; name: string; reason: string }[];
   failedRows: { rowIndex: number; name: string; reason: string }[];
+  warningRows: { rowIndex: number; name: string; reason: string }[];
   accountProvisionResult: { success: number; failed: number; errors: string[] };
 }> {
   const deptLabelMap = Object.fromEntries(departments.map((d) => [d.label.trim(), d.id]));
@@ -280,6 +346,7 @@ export async function batchImportEmployees(
 
   // 账号开通统计
   const accountProvisionResult = { success: 0, failed: 0, errors: [] as string[] };
+  const warningRows: { rowIndex: number; name: string; reason: string }[] = [];
 
   // 收集成功导入的员工信息（用于后续自动开通账号）
   const importedEmployees: { id: string; fullName: string; mobileNumber: string }[] = [];
@@ -393,9 +460,9 @@ export async function batchImportEmployees(
         });
       }
 
-      // 如果有未匹配的技能名，仍然算成功，但附加警告
+      // 如果有未匹配的技能名，记录为警告（不影响成功计数）
       if (unmatchedSkills.length > 0) {
-        failedRows.push({
+        warningRows.push({
           rowIndex: row.rowIndex,
           name: row.fullName,
           reason: `员工已创建，但以下技能未找到：${unmatchedSkills.join('、')}`,
@@ -436,53 +503,61 @@ export async function batchImportEmployees(
     }
   }
 
-  // ── 自动为成功导入的员工开通登录账号 ──────────────────────────
-  if (importedEmployees.length > 0 && employeeRoleId) {
-    for (const emp of importedEmployees) {
-      // 跳过已有账号的员工
-      if (existingAccountMobiles.has(emp.mobileNumber) || existingAccountEmpIds.has(emp.id)) {
-        accountProvisionResult.success++; // 已有账号视为成功
-        continue;
-      }
+  // ── 自动为成功导入的员工开通登录账号（通过 Edge Function 在 Supabase Auth 中创建认证用户） ──
+  if (importedEmployees.length > 0) {
+    // 过滤掉已有账号的员工
+    const newEmployeeIds = importedEmployees
+      .filter(emp => !existingAccountMobiles.has(emp.mobileNumber) && !existingAccountEmpIds.has(emp.id))
+      .map(emp => emp.id);
 
-      const defaultPassword = emp.mobileNumber.slice(-6); // 手机号后6位作为初始密码
+    if (newEmployeeIds.length > 0) {
       try {
-        const { data: acct, error: acctErr } = await supabase
-          .from('user_account')
-          .insert({
-            username: emp.mobileNumber,
-            password_hash: `mock::${defaultPassword}`,
-            employee_id: emp.id,
-            account_status: 'active',
-            account_source: 'web',
-            is_enabled: true,
-            must_change_password: true,
-          })
-          .select('id')
-          .single();
+        const { data: sessionData } = await supabase.auth.getSession();
+        const token = sessionData?.session?.access_token;
+        // 动态导入获取配置
+        const { supabaseUrl, publicAnonKey } = await import('@/app/lib/supabase/client');
+        const authToken = token || publicAnonKey;
 
-        if (acctErr) {
-          if (acctErr.code === '23505') {
-            // 唯一约束冲突 = 已有账号，跳过
-            accountProvisionResult.success++;
-          } else {
-            accountProvisionResult.errors.push(`${emp.fullName}(${emp.mobileNumber}): ${acctErr.message}`);
-            accountProvisionResult.failed++;
+        const res = await fetch(`${supabaseUrl}/functions/v1/employee-account-provision`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${authToken}`,
+            'apikey': publicAnonKey,
+          },
+          body: JSON.stringify({
+            employee_ids: newEmployeeIds,
+            default_password: undefined, // 使用 Edge Function 内的默认密码逻辑
+          }),
+        });
+
+        const result = await res.json();
+        if (result.success && result.data?.results) {
+          for (const r of result.data.results) {
+            if (r.status === 'success') {
+              accountProvisionResult.success++;
+            } else if (r.status === 'skipped') {
+              accountProvisionResult.success++; // 已存在视为成功
+            } else {
+              accountProvisionResult.failed++;
+              accountProvisionResult.errors.push(`${r.employeeName}(${r.employeeId}): ${r.message}`);
+            }
           }
-          continue;
+        } else {
+          // Edge Function 整体失败
+          accountProvisionResult.failed += newEmployeeIds.length;
+          accountProvisionResult.errors.push(result.message || '账号开通服务异常');
         }
-
-        // 绑定 employee 角色
-        if (acct?.id) {
-          await supabase.from('user_role').insert({ user_account_id: acct.id, role_id: employeeRoleId });
-        }
-        accountProvisionResult.success++;
       } catch (e: any) {
-        accountProvisionResult.errors.push(`${emp.fullName}(${emp.mobileNumber}): ${e.message || '未知错误'}`);
-        accountProvisionResult.failed++;
+        accountProvisionResult.failed += newEmployeeIds.length;
+        accountProvisionResult.errors.push(`调用账号开通服务失败: ${e.message || '未知错误'}`);
       }
     }
+
+    // 已有账号的员工计入成功
+    const skippedCount2 = importedEmployees.length - newEmployeeIds.length;
+    accountProvisionResult.success += skippedCount2;
   }
 
-  return { successCount, skippedCount, skippedRows, failedRows, accountProvisionResult };
+  return { successCount, skippedCount, skippedRows, failedRows, warningRows, accountProvisionResult };
 }
