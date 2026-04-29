@@ -40,6 +40,8 @@ import type {
 
 type ImportResult = {
   successCount: number;
+  skippedCount: number;
+  skippedRows: { rowIndex: number; name: string; reason: string }[];
   failedRows: { rowIndex: number; name: string; reason: string }[];
   accountProvisionResult: { success: number; failed: number; errors: string[] };
 };
@@ -79,6 +81,7 @@ export function EmployeePage() {
   const [importProgress, setImportProgress]     = useState(0);
   const [importResult, setImportResult]         = useState<ImportResult | null>(null);
   const [importFileName, setImportFileName]     = useState('');
+  const [importProjectId, setImportProjectId]   = useState<string | undefined>();
   const fileInputRef                            = useRef<HTMLInputElement>(null);
 
   // 员工账号开通
@@ -438,25 +441,33 @@ export function EmployeePage() {
         setImportProgress((p) => Math.min(p + 10, 90));
       }, 200);
 
-      const result = await batchImportEmployees(importRows, departments, channels);
+      const result = await batchImportEmployees(importRows, departments, channels, importProjectId);
       clearInterval(timer);
       setImportProgress(100);
       setImportResult(result);
+
+      // 消息提示
+      const parts: string[] = [];
+      if (result.successCount > 0) parts.push(`新增 ${result.successCount} 名员工`);
+      if (result.skippedCount > 0) parts.push(`${result.skippedCount} 名已存在已跳过`);
+      if (result.failedRows.length > 0) parts.push(`${result.failedRows.length} 行导入失败`);
 
       if (result.successCount > 0) {
         const acctMsg = result.accountProvisionResult.success > 0
           ? `，已自动开通 ${result.accountProvisionResult.success} 个登录账号`
           : '';
-        message.success(`成功导入 ${result.successCount} 条员工记录${acctMsg}`);
+        message.success(`${parts.join('，')}${acctMsg}`);
         await loadData();
-        // 刷新账号状态（如果是管理员）
         if (isAdmin) loadAccountStatuses();
+      } else if (result.skippedCount > 0 && result.failedRows.length === 0) {
+        message.info(parts.join('，'));
+        // 已存在的员工关联项目也需要刷新
+        await loadData();
+      } else {
+        message.warning(parts.join('，'));
       }
       if (result.accountProvisionResult.failed > 0) {
         message.warning(`${result.accountProvisionResult.failed} 个账号开通失败，请查看详情`);
-      }
-      if (result.failedRows.length > 0) {
-        message.warning(`${result.failedRows.length} 行导入失败，请查看错误详情`);
       }
     } catch (err) {
       message.error(getErrorMessage(err, '导入过程中发生错误'));
@@ -525,6 +536,7 @@ export function EmployeePage() {
     setImportResult(null);
     setImportProgress(0);
     setImportFileName('');
+    setImportProjectId(undefined);
   }
 
   const deptMap   = useMemo(() => Object.fromEntries(departments.map((item) => [item.id, item.label])), [departments]);
@@ -985,25 +997,34 @@ export function EmployeePage() {
         {/* 导入结果 */}
         {importResult ? (
           <div>
+            {/* 导入统计概览 */}
             <Alert
               type={importResult.failedRows.length > 0 ? 'warning' : 'success'}
               showIcon
               message={
                 <span>
-                  导入完成：成功 <strong>{importResult.successCount}</strong> 条，失败 <strong>{importResult.failedRows.length}</strong> 条
+                  导入完成：
+                  新增 <strong style={{ color: '#52c41a' }}>{importResult.successCount}</strong> 名
+                  {importResult.skippedCount > 0 && (
+                    <>，已存在跳过 <strong style={{ color: '#1677ff' }}>{importResult.skippedCount}</strong> 名</>
+                  )}
+                  {importResult.failedRows.length > 0 && (
+                    <>，失败 <strong style={{ color: '#ff4d4f' }}>{importResult.failedRows.length}</strong> 行</>
+                  )}
                 </span>
               }
               style={{ marginBottom: 12 }}
             />
-            {/* 账号开通结果 */}
-            {importResult.accountProvisionResult && (
+
+            {/* 账号开通结果（仅新增员工时显示） */}
+            {importResult.successCount > 0 && importResult.accountProvisionResult && (
               <Alert
                 type={importResult.accountProvisionResult.failed > 0 ? 'warning' : 'info'}
                 showIcon
                 icon={<UserAddOutlined />}
                 message={
                   <span>
-                    账号自动开通：成功 <strong>{importResult.accountProvisionResult.success}</strong> 个
+                    新员工账号自动开通：成功 <strong>{importResult.accountProvisionResult.success}</strong> 个
                     {importResult.accountProvisionResult.failed > 0 && (
                       <>，失败 <strong style={{ color: '#ff4d4f' }}>{importResult.accountProvisionResult.failed}</strong> 个</>
                     )}
@@ -1031,19 +1052,44 @@ export function EmployeePage() {
                 style={{ marginBottom: 12 }}
               />
             )}
+
+            {/* 已存在员工跳过列表 */}
+            {importResult.skippedRows.length > 0 && (
+              <>
+                <Typography.Text strong style={{ display: 'block', marginBottom: 4 }}>已存在员工（已跳过创建{importProjectId ? '，已自动关联项目' : ''}）</Typography.Text>
+                <Table
+                  size="small"
+                  rowKey="rowIndex"
+                  pagination={false}
+                  dataSource={importResult.skippedRows}
+                  scroll={{ y: 150 }}
+                  columns={[
+                    { title: 'Excel 行号', dataIndex: 'rowIndex', width: 80 },
+                    { title: '姓名', dataIndex: 'name', width: 100 },
+                    { title: '说明', dataIndex: 'reason', render: (v: string) => <Typography.Text type="secondary">{v}</Typography.Text> },
+                  ]}
+                  style={{ marginBottom: 12 }}
+                />
+              </>
+            )}
+
+            {/* 导入失败列表 */}
             {importResult.failedRows.length > 0 && (
-              <Table
-                size="small"
-                rowKey="rowIndex"
-                pagination={false}
-                dataSource={importResult.failedRows}
-                scroll={{ y: 300 }}
-                columns={[
-                  { title: 'Excel 行号', dataIndex: 'rowIndex', width: 80 },
-                  { title: '姓名', dataIndex: 'name', width: 100 },
-                  { title: '失败原因', dataIndex: 'reason', render: (v) => <Typography.Text type="danger">{v}</Typography.Text> },
-                ]}
-              />
+              <>
+                <Typography.Text strong type="danger" style={{ display: 'block', marginBottom: 4 }}>导入失败明细</Typography.Text>
+                <Table
+                  size="small"
+                  rowKey="rowIndex"
+                  pagination={false}
+                  dataSource={importResult.failedRows}
+                  scroll={{ y: 200 }}
+                  columns={[
+                    { title: 'Excel 行号', dataIndex: 'rowIndex', width: 80 },
+                    { title: '姓名', dataIndex: 'name', width: 100 },
+                    { title: '失败原因', dataIndex: 'reason', render: (v: string) => <Typography.Text type="danger">{v}</Typography.Text> },
+                  ]}
+                />
+              </>
             )}
           </div>
         ) : (
@@ -1053,6 +1099,26 @@ export function EmployeePage() {
               <Tag color="blue">共 {importRows.length} 行</Tag>
               <Tag color="green">有效 {validCount} 行</Tag>
               {errorCount > 0 && <Tag color="red" icon={<WarningOutlined />}>格式错误 {errorCount} 行（将被跳过）</Tag>}
+            </div>
+
+            {/* 项目选择 */}
+            <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Typography.Text strong style={{ whiteSpace: 'nowrap' }}>关联项目：</Typography.Text>
+              <Select
+                allowClear
+                placeholder="选择项目（可选，导入后自动关联）"
+                style={{ width: 320 }}
+                value={importProjectId}
+                onChange={(v) => setImportProjectId(v)}
+                showSearch
+                optionFilterProp="label"
+                options={projects.map((p) => ({ label: p.name, value: p.id }))}
+              />
+              {!importProjectId && (
+                <Typography.Text type="warning" style={{ fontSize: 12 }}>
+                  未选择项目时，导入后需手动到项目管理中添加员工
+                </Typography.Text>
+              )}
             </div>
 
             {/* 进度条 */}

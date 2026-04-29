@@ -189,8 +189,11 @@ export async function batchImportEmployees(
   rows: ImportRow[],
   departments: ReferenceOption[],
   channels: ReferenceOption[],
+  projectId?: string,
 ): Promise<{
   successCount: number;
+  skippedCount: number;
+  skippedRows: { rowIndex: number; name: string; reason: string }[];
   failedRows: { rowIndex: number; name: string; reason: string }[];
   accountProvisionResult: { success: number; failed: number; errors: string[] };
 }> {
@@ -271,6 +274,8 @@ export async function batchImportEmployees(
   } catch { /* ignore */ }
 
   let successCount = 0;
+  let skippedCount = 0;
+  const skippedRows: { rowIndex: number; name: string; reason: string }[] = [];
   const failedRows: { rowIndex: number; name: string; reason: string }[] = [];
 
   // 账号开通统计
@@ -278,6 +283,21 @@ export async function batchImportEmployees(
 
   // 收集成功导入的员工信息（用于后续自动开通账号）
   const importedEmployees: { id: string; fullName: string; mobileNumber: string }[] = [];
+  // 收集已存在的员工（用于关联项目，但不重复创建）
+  const existingEmployeesForProject: { id: string; fullName: string }[] = [];
+
+  // 预加载系统中所有员工的手机号→ID映射（用于判断是否已存在）
+  const existingEmpByMobile = new Map<string, { id: string; fullName: string }>();
+  try {
+    const { data: allEmps } = await supabase
+      .from('employee')
+      .select('id, full_name, mobile_number');
+    (allEmps || []).forEach((e: any) => {
+      if (e.mobile_number) {
+        existingEmpByMobile.set(e.mobile_number, { id: e.id, fullName: e.full_name });
+      }
+    });
+  } catch { /* ignore */ }
 
   // 本地校验失败的行直接跳过
   const validRows = rows.filter((row) => !row.error);
@@ -297,6 +317,23 @@ export async function batchImportEmployees(
     }
     if (!channelId) {
       failedRows.push({ rowIndex: row.rowIndex, name: row.fullName, reason: `找不到渠道"${row.channelName}"，请核对渠道名称` });
+      continue;
+    }
+
+    // 检查该手机号是否已存在
+    const existingEmp = existingEmpByMobile.get(row.mobileNumber);
+    if (existingEmp) {
+      // 员工已存在，不重复创建，只收集起来用于项目关联
+      existingEmployeesForProject.push(existingEmp);
+      skippedCount++;
+      const reason = projectId
+        ? `员工已存在，已自动关联到所选项目`
+        : `员工已存在，已跳过`;
+      skippedRows.push({
+        rowIndex: row.rowIndex,
+        name: row.fullName,
+        reason,
+      });
       continue;
     }
 
@@ -369,6 +406,36 @@ export async function batchImportEmployees(
     }
   }
 
+  // ── 自动关联到指定项目（包含新导入 + 已存在的员工） ──────────────────────────
+  const allEmployeesToAssociate = [...importedEmployees, ...existingEmployeesForProject];
+  if (projectId && allEmployeesToAssociate.length > 0) {
+    // 去重（同一个员工可能同时在两个数组中）
+    const uniqueIds = [...new Set(allEmployeesToAssociate.map(e => e.id))];
+
+    // 先查询已关联的员工ID集合，避免重复插入
+    const { data: existingPE } = await supabase
+      .from('project_employee')
+      .select('employee_id')
+      .eq('project_id', projectId)
+      .in('employee_id', uniqueIds);
+    const existingPEIds = new Set((existingPE || []).map((r: any) => r.employee_id));
+
+    const peInserts = uniqueIds
+      .filter(empId => !existingPEIds.has(empId))
+      .map(empId => ({
+        project_id: projectId,
+        employee_id: empId,
+        is_active: true,
+      }));
+
+    if (peInserts.length > 0) {
+      const { error: peError } = await supabase.from('project_employee').insert(peInserts);
+      if (peError) {
+        console.warn('自动关联项目失败:', peError.message);
+      }
+    }
+  }
+
   // ── 自动为成功导入的员工开通登录账号 ──────────────────────────
   if (importedEmployees.length > 0 && employeeRoleId) {
     for (const emp of importedEmployees) {
@@ -417,5 +484,5 @@ export async function batchImportEmployees(
     }
   }
 
-  return { successCount, failedRows, accountProvisionResult };
+  return { successCount, skippedCount, skippedRows, failedRows, accountProvisionResult };
 }
